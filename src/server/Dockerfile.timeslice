@@ -1,0 +1,32 @@
+# TimeSlice sampler image: Open-RL sampler code on the vLLM base validated
+# end-to-end with GPU-CR (v0.22.0), plus the prebuilt vGPU-NVIDIA.so preloader
+# and the timeslice snapshot-agent client.
+#
+# The prebuilt .so from the llm-d branch is used deliberately: it contains
+# fixes (signal remaps to SIGRTMAX-8/-7, hugetlbfs pinned-memory tolerance)
+# that are not all present in the GPU-CR v0.2.0 tag — do not rebuild from tag.
+FROM vllm/vllm-openai:v0.22.0
+
+USER root
+WORKDIR /app
+
+ADD https://raw.githubusercontent.com/Edwinhr716/llm-d-rl-time-slicing/gcr-backend-memory-allocation/bin/vGPU-NVIDIA.so /usr/local/lib/vGPU-NVIDIA.so
+RUN chmod 755 /usr/local/lib/vGPU-NVIDIA.so
+
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir --upgrade protobuf grpcio grpcio-tools peft redis \
+    opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi && \
+    pip install --no-cache-dir \
+    "git+https://github.com/Edwinhr716/llm-d-rl-time-slicing.git@gcr-backend-memory-allocation#subdirectory=pkg/client/python"
+
+# One image serves every role: sampler (default entrypoint), trainer
+# (python -m server.training_requests_processor with
+# TIMESLICE_TRAINER_ENABLED=1), gateway (uvicorn server.gateway:app), demo
+# driver + gate scripts (scripts/).
+COPY src/server /app/server
+COPY src/training /app/training
+COPY src/snapshot_agent /app/snapshot_agent
+COPY scripts /app/scripts
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python3", "-m", "server.timeslice_vllm_sampler"]

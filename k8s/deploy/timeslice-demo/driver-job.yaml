@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: timeslice-demo-driver
+  namespace: openrl-demo
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: {app: timeslice-demo-driver}
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: driver
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        command: ["python3", "scripts/timeslice_demo_driver.py"]
+        env:
+        - {name: GATEWAY_URL, value: "http://gateway:8000"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
+        - {name: ROUNDS, value: "8"}
+        - {name: LEARNING_RATE, value: "1e-3"}
+        resources:
+          requests: {memory: "512Mi", cpu: "250m"}
+          limits: {memory: "1Gi"}

@@ -1,0 +1,201 @@
+# Phase 3 TimeSlice demo stack. All GPU pods land on the single 2xL4
+# hugepages node (sampler GPU 0, trainer GPU 1, per device-plugin
+# assignment); redis/gateway/driver run on CPU nodes. Trainer and sampler
+# share adapters via hostPath /var/tmp/open-rl (node-local "Filestore").
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openrl-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: openrl-demo
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata:
+      labels: {app: redis}
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports: [{containerPort: 6379}]
+        resources:
+          requests: {memory: "256Mi", cpu: "100m"}
+          limits: {memory: "512Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: openrl-demo
+spec:
+  selector: {app: redis}
+  ports: [{port: 6379}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: openrl-demo
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: gateway}}
+  template:
+    metadata:
+      labels: {app: gateway}
+    spec:
+      containers:
+      - name: gateway
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        command: ["python3", "-m", "uvicorn", "server.gateway:app", "--host", "0.0.0.0", "--port", "8000"]
+        env:
+        - {name: REDIS_URL, value: "redis://redis:6379"}
+        - {name: VLLM_URL, value: "http://timeslice-sampler:8001"}
+        - {name: OPEN_RL_TMP_DIR, value: "/mnt/open-rl"}
+        ports: [{containerPort: 8000}]
+        resources:
+          requests: {memory: "768Mi", cpu: "250m"}
+          limits: {memory: "1536Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: openrl-demo
+spec:
+  selector: {app: gateway}
+  ports: [{port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeslice-sampler
+  namespace: openrl-demo
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: timeslice-sampler}}
+  template:
+    metadata:
+      labels:
+        app: timeslice-sampler
+        snapshot-agent: "true"
+        timeslice.io/job-id: "openrl-sampler"
+    spec:
+      hostIPC: true
+      hostPID: true
+      containers:
+      - name: sampler
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        securityContext: {runAsUser: 0}
+        env:
+        - name: NODE_IP
+          valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+        - {name: AGENT_ENDPOINT, value: "$(NODE_IP):9001"}
+        - {name: JOB_ID, value: "openrl-sampler"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
+        - {name: TIMESLICE_ENABLED, value: "1"}
+        - {name: VLLM_GPU_MEMORY_UTILIZATION, value: "0.5"}
+        - {name: SAMPLER_PORT, value: "8001"}
+        - {name: GPU_VENDOR, value: "NVIDIA"}
+        - {name: LD_PRELOAD, value: "/usr/local/lib/vGPU-NVIDIA.so"}
+        - {name: VLLM_ENABLE_V1_MULTIPROCESSING, value: "0"}
+        - {name: LD_LIBRARY_PATH, value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"}
+        - {name: PYTORCH_NO_CUDA_MEMORY_CACHING, value: "1"}
+        - {name: CUDA_VISIBLE_DEVICES, value: "0"}
+        - {name: CUDA_LAUNCH_BLOCKING, value: "1"}
+        - {name: VLLM_ALLOW_INSECURE_SERIALIZATION, value: "1"}
+        - {name: TIMESLICE_METRICS_PATH, value: "/mnt/open-rl/metrics/sampler.jsonl"}
+        ports: [{containerPort: 8001}]
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8001}
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        volumeMounts:
+        - {name: huge-ckpt, mountPath: /mnt/huge-ckpt, mountPropagation: HostToContainer}
+        - {name: open-rl, mountPath: /mnt/open-rl}
+        resources:
+          requests:
+            memory: "5Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "5Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - {name: huge-ckpt, hostPath: {path: /var/tmp/huge-ckpt, type: DirectoryOrCreate}}
+      - {name: open-rl, hostPath: {path: /var/tmp/open-rl, type: DirectoryOrCreate}}
+      tolerations:
+      - {key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeslice-sampler
+  namespace: openrl-demo
+spec:
+  selector: {app: timeslice-sampler}
+  ports: [{port: 8001}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trainer-worker
+  namespace: openrl-demo
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: trainer-worker}}
+  template:
+    metadata:
+      labels:
+        app: trainer-worker
+        snapshot-agent: "true"
+        timeslice.io/job-id: "openrl-trainer"
+    spec:
+      hostIPC: true
+      hostPID: true
+      containers:
+      - name: trainer
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        command: ["python3", "-m", "server.training_requests_processor"]
+        securityContext: {runAsUser: 0}
+        env:
+        - name: NODE_IP
+          valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+        - {name: AGENT_ENDPOINT, value: "$(NODE_IP):9001"}
+        - {name: JOB_ID, value: "openrl-trainer"}
+        - {name: REDIS_URL, value: "redis://redis.openrl-demo.svc.cluster.local:6379"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
+        - {name: TIMESLICE_TRAINER_ENABLED, value: "1"}
+        - {name: OPEN_RL_TMP_DIR, value: "/mnt/open-rl"}
+        - {name: ENABLE_GRADIENT_CHECKPOINTING, value: "0"}
+        - {name: GPU_VENDOR, value: "NVIDIA"}
+        - {name: LD_PRELOAD, value: "/usr/local/lib/vGPU-NVIDIA.so"}
+        - {name: LD_LIBRARY_PATH, value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"}
+        - {name: PYTORCH_NO_CUDA_MEMORY_CACHING, value: "1"}
+        - {name: CUDA_VISIBLE_DEVICES, value: "0"}
+        - {name: CUDA_LAUNCH_BLOCKING, value: "1"}
+        - {name: TIMESLICE_METRICS_PATH, value: "/mnt/open-rl/metrics/trainer.jsonl"}
+        volumeMounts:
+        - {name: huge-ckpt, mountPath: /mnt/huge-ckpt, mountPropagation: HostToContainer}
+        - {name: open-rl, mountPath: /mnt/open-rl}
+        resources:
+          requests:
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - {name: huge-ckpt, hostPath: {path: /var/tmp/huge-ckpt, type: DirectoryOrCreate}}
+      - {name: open-rl, hostPath: {path: /var/tmp/open-rl, type: DirectoryOrCreate}}
+      tolerations:
+      - {key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule"}

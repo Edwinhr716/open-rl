@@ -1,0 +1,17 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args:
+  - build
+  - -f
+  - src/server/Dockerfile.timeslice
+  - -t
+  - asia-southeast1-docker.pkg.dev/$PROJECT_ID/time-slicing/open-rl/timeslice-sampler:$_TAG
+  - .
+images:
+- asia-southeast1-docker.pkg.dev/$PROJECT_ID/time-slicing/open-rl/timeslice-sampler:$_TAG
+substitutions:
+  _TAG: v8
+options:
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: 200
+timeout: 3600s

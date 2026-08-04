@@ -114,9 +114,13 @@ class TrainingRequestsProcessor(Protocol):
 
 
 class LoraTrainingRequestsProcessor(TrainingRequestsProcessor):
-  def __init__(self, store: RequestStore, worker: LoraTrainingWorker):
+  def __init__(self, store: RequestStore, worker: LoraTrainingWorker, tenant_manager=None):
     self.store = store
     self.worker = worker
+    # TimesliceTenantManager (optional): swaps inactive tenants' adapter +
+    # optimizer GPU memory out via the snapshot agent at batch boundaries.
+    self.tenant_manager = tenant_manager
+    self._active_tenant: str | None = None
 
   async def run(self) -> None:
     print("[WORKER] LoRA training requests processor started.")
@@ -144,6 +148,11 @@ class LoraTrainingRequestsProcessor(TrainingRequestsProcessor):
       batch_span.set_attribute("model_id", model_id)
 
       print(f"\n[TRAINING REQUESTS] Popped {len(batch)} requests for model: {model_id}")
+      if self.tenant_manager is not None and model_id != self._active_tenant:
+        # Tenant boundary: evict the previous tenant's adapter + optimizer
+        # GPU memory, restore this tenant's if it was swapped out.
+        await asyncio.to_thread(self.tenant_manager.switch_tenant, self._active_tenant, model_id)
+        self._active_tenant = model_id
       for request in batch:
         await self.process_request(request, model_id)
 
@@ -151,6 +160,8 @@ class LoraTrainingRequestsProcessor(TrainingRequestsProcessor):
     raw_config = payload.get("lora_config") or {}
     lora_config = LoraConfig(**{k: v for k, v in raw_config.items() if k in LoraConfig.model_fields})
     await asyncio.to_thread(self.worker.create_model, payload["base_model"], model_id, lora_config)
+    if self.tenant_manager is not None:
+      self.tenant_manager.forget(model_id)  # adapter tensors (re)allocated
     return {
       "base_model": payload["base_model"],
       "model_id": model_id,
@@ -166,6 +177,8 @@ class LoraTrainingRequestsProcessor(TrainingRequestsProcessor):
       payload["state_path"],
       bool(payload.get("restore_optimizer", False)),
     )
+    if self.tenant_manager is not None:
+      self.tenant_manager.forget(model_id)  # load_from_state reallocates the adapter
     return {
       "base_model": result.get("base_model"),
       "model_id": result.get("model_id", model_id),
@@ -220,6 +233,8 @@ class LoraTrainingRequestsProcessor(TrainingRequestsProcessor):
       payload["state_path"],
       bool(payload.get("restore_optimizer", False)),
     )
+    if self.tenant_manager is not None:
+      self.tenant_manager.forget(model_id)  # load_from_state reallocates the adapter
     return {"path": payload["state_path"], "type": "weights_loaded"}
 
   async def save_weights_for_sampler(self, payload: dict[str, Any], model_id: str) -> dict[str, Any]:
@@ -396,7 +411,14 @@ async def run_training_requests_processor(
       snapshot_client = create_snapshot_agent_client(snapshot_socket)
     processor = FFTTrainingRequestsProcessor(store, worker, model_id, snapshot_client)
   else:
-    processor = LoraTrainingRequestsProcessor(store, worker)
+    tenant_manager = None
+    if os.getenv("TIMESLICE_TRAINER_ENABLED", "0") == "1":
+      from training.timeslice_tenant import TimesliceTenantManager
+
+      tenant_manager = TimesliceTenantManager()
+      tenant_manager.attach_worker(worker)
+      print("[timeslice-trainer] tenant swapping enabled")
+    processor = LoraTrainingRequestsProcessor(store, worker, tenant_manager)
   await processor.run()
 
 
