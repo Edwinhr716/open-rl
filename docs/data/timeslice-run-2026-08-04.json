@@ -186,5 +186,30 @@
   ],
   "n_out": 8,
   "n_in": 7
+ },
+ "scale_test": {
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "rank": 64,
+  "regions": 1502,
+  "snapshot": {
+   "swap_out_ms": 3612.4,
+   "swap_in_ms": 1674.1,
+   "switch_ms": [
+    3587.5,
+    4805.5,
+    5099.8
+   ],
+   "vram_freed_mb": 3823.1,
+   "failures": 0,
+   "tensors_verified": 1512
+  },
+  "disk_baseline": {
+   "swap_out_p50_ms": 9390.2,
+   "swap_in_p50_ms": 8721.3,
+   "flush_caches": true,
+   "cycles": 3,
+   "failures": 0
+  },
+  "note": "disk numbers are cache-honest (sync after save, drop_caches before load); the 0.5B disk numbers were cache-warm"
  }
 }

@@ -83,6 +83,19 @@ PEFT module rebuild, address stability — need sub-block dumps and/or slower sh
 to dominate. Disk numbers include page-cache absorption; network filesystems (Filestore/NFS) shift the
 disk path right, not the snapshot path.</p></div>
 
+<div class="card"><h2 style="margin-top:0">The crossover: switch round-trip vs model scale</h2>
+<div class="legend"><span style="--c:var(--series-1)">snapshot agent swap</span><span style="--c:var(--series-2)">disk round-trip (save_state + load_from_state)</span></div>
+<svg viewBox="0 0 950 210" role="img" aria-label="Tenant switch round-trip vs model scale"><line x1="40" y1="186" x2="940" y2="186" stroke="var(--axis)"/><line x1="40" y1="97.0" x2="940" y2="97.0" stroke="var(--grid)"/><text x="36" y="101.0" text-anchor="end">9s</text><line x1="40" y1="8.0" x2="940" y2="8.0" stroke="var(--grid)"/><text x="36" y="12.0" text-anchor="end">18s</text><path d="M80.0,186.0 v-24.617199017199024 a4,4 0 0 1 4,-4 h52 a4,4 0 0 1 4,4 v24.617199017199024 z" fill="var(--series-1)" data-tip="0.5B / rank 16 snapshot swap: 2.9s round-trip"/><text class="val" x="110.0" y="152.38280098280097" text-anchor="middle">2.9s</text><path d="M142.0,186.0 v-10.157248157248157 a4,4 0 0 1 4,-4 h52 a4,4 0 0 1 4,4 v10.157248157248157 z" fill="var(--series-2)" data-tip="0.5B / rank 16 disk round-trip: 1.4s round-trip"/><text class="val" x="172.0" y="166.84275184275185" text-anchor="middle">1.4s</text><text class="cat" x="141.0" y="201" text-anchor="middle">0.5B / rank 16</text><path d="M525.0,186.0 v-47.955773955773964 a4,4 0 0 1 4,-4 h52 a4,4 0 0 1 4,4 v47.955773955773964 z" fill="var(--series-1)" data-tip="4B / rank 64 snapshot swap: 5.3s round-trip"/><text class="val" x="555.0" y="129.04422604422604" text-anchor="middle">5.3s</text><path d="M587.0,186.0 v-174.0 a4,4 0 0 1 4,-4 h52 a4,4 0 0 1 4,4 v174.0 z" fill="var(--series-2)" data-tip="4B / rank 64 disk round-trip: 18.1s round-trip"/><text class="val" x="617.0" y="3.0" text-anchor="middle">18.1s</text><text class="cat" x="586.0" y="201" text-anchor="middle">4B / rank 64</text></svg>
+<p class="note">Measured 2026-08-04 on the same L4 node. At 0.5B/rank-16 the disk path wins ~2x (and its
+number is cache-warm — flattering). At Qwen3-4B-Instruct-2507/rank-64 with cache-honest I/O
+(sync + drop_caches), the disk path degrades to 18.1s
+while the snapshot swap holds at 5.3s —
+<b>a 3.4x win for the snapshot agent</b>,
+freeing 3.8GB of VRAM per parked tenant (all
+1512 tensors bitwise-verified, write-after-restore intact). Block
+amplification shrinks naturally with tensor size (~20x at rank 16 → ~1.6x at rank 64), while the disk path
+scales with real bytes through serialization and storage — network filesystems widen the gap further.</p></div>
+
 <div class="card"><h2 style="margin-top:0">Physical VRAM freed per trainer swap-out</h2>
 <svg viewBox="0 0 950 150" role="img" aria-label="VRAM freed per trainer swap-out"><line x1="40" y1="128" x2="940" y2="128" stroke="var(--axis)"/><line x1="40" y1="8" x2="940" y2="8" stroke="var(--grid)"/><text x="36" y="12" text-anchor="end">2.1GB</text><path d="M50,128.0 v-115.75675675675677 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v115.75675675675677 z" fill="var(--series-1)" data-tip="swap #1: 2068 MB freed"/><text x="70.0" y="141" text-anchor="middle">1</text><path d="M94,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #2: 1988 MB freed"/><text x="114.0" y="141" text-anchor="middle">2</text><path d="M138,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #3: 2072 MB freed"/><text x="158.0" y="141" text-anchor="middle">3</text><path d="M182,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #4: 1988 MB freed"/><text x="202.0" y="141" text-anchor="middle">4</text><path d="M226,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #5: 2072 MB freed"/><text x="246.0" y="141" text-anchor="middle">5</text><path d="M270,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #6: 1988 MB freed"/><text x="290.0" y="141" text-anchor="middle">6</text><path d="M314,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #7: 2072 MB freed"/><text x="334.0" y="141" text-anchor="middle">7</text><path d="M358,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #8: 1988 MB freed"/><text x="378.0" y="141" text-anchor="middle">8</text><path d="M402,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #9: 2072 MB freed"/><text x="422.0" y="141" text-anchor="middle">9</text><path d="M446,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #10: 1988 MB freed"/><text x="466.0" y="141" text-anchor="middle">10</text><path d="M490,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #11: 2072 MB freed"/><text x="510.0" y="141" text-anchor="middle">11</text><path d="M534,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #12: 1988 MB freed"/><text x="554.0" y="141" text-anchor="middle">12</text><path d="M578,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #13: 2072 MB freed"/><text x="598.0" y="141" text-anchor="middle">13</text><path d="M622,128.0 v-111.14092664092664 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v111.14092664092664 z" fill="var(--series-1)" data-tip="swap #14: 1988 MB freed"/><text x="642.0" y="141" text-anchor="middle">14</text><path d="M666,128.0 v-116.0 a4,4 0 0 1 4,-4 h32 a4,4 0 0 1 4,4 v116.0 z" fill="var(--series-1)" data-tip="swap #15: 2072 MB freed"/><text x="686.0" y="141" text-anchor="middle">15</text></svg>
 <p class="note">Every parked tenant returns its adapter + AdamW optimizer state to the pool
@@ -100,10 +113,13 @@ swap cycle. (Tenant-B degraded to deterministic token-0 output in snapshot mode 
 <ol style="font-size:13px;color:var(--ink-2);margin:6px 0 2px;padding-left:18px">
 <li><b>The mechanism is correct</b> — raw GPU-memory snapshot/restore of live vLLM LoRA slots and live
 trainer adapter+optimizer state is bit-stable, including optimizer steps <i>after</i> restore.</li>
-<li><b>Under resource pressure, disk multiplexing wins at this scale</b> — the honest constrained baseline
-(save_state + load_from_state) round-trips in ~1.4s
-vs the snapshot switch's 2.9s, because it moves only the real
-101MB of state while GPU-CR moves ~2GB of 2MB-aligned blocks.</li>
+<li><b>The winner depends on scale, and the crossover is measured</b> — at 0.5B/rank-16 the disk baseline
+round-trips in ~1.4s (cache-warm)
+vs the snapshot switch's 2.9s; at 4B/rank-64 with honest I/O the disk
+path takes 18.1s vs the
+snapshot swap's 5.3s —
+a 3.4x
+snapshot win at production-like state sizes, before network storage widens it further.</li>
 <li><b>Block granularity is the whole ballgame</b> — ~20× data amplification on the trainer, ~48× on the
 sampler; it also inflates the resident footprint itself (the no-caching-allocator requirement turns ~330MB
 of packed tensors into ~2GB of blocks). Upstream sub-block dumps would flip both the latency and footprint

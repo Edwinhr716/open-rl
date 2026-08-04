@@ -1,0 +1,27 @@
+# Variant of Dockerfile.timeslice for validating the unrounded-selective-dump
+# GPU-CR patch: identical except the preloader comes from the locally built
+# gpucr-so image (GPU-CR branch unrounded-selective-dumps + user-guide seds)
+# instead of the prebuilt on the llm-d GitHub branch.
+FROM asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/gpucr-so:unrounded-v1 AS gpucr
+
+FROM vllm/vllm-openai:v0.22.0
+
+USER root
+WORKDIR /app
+
+COPY --from=gpucr /vGPU-NVIDIA.so /usr/local/lib/vGPU-NVIDIA.so
+RUN chmod 755 /usr/local/lib/vGPU-NVIDIA.so
+
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir --upgrade protobuf grpcio grpcio-tools peft redis \
+    opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi && \
+    pip install --no-cache-dir \
+    "git+https://github.com/Edwinhr716/llm-d-rl-time-slicing.git@gcr-backend-memory-allocation#subdirectory=pkg/client/python"
+
+COPY src/server /app/server
+COPY src/training /app/training
+COPY src/snapshot_agent /app/snapshot_agent
+COPY scripts /app/scripts
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python3", "-m", "server.timeslice_vllm_sampler"]

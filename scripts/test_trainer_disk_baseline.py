@@ -32,6 +32,19 @@ from training.lora_trainer_worker import LoraConfig, LoraTrainingWorker
 BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-0.5B")
 CYCLES = int(os.getenv("CYCLES", "4"))
 STATE_ROOT = os.getenv("STATE_ROOT", "/mnt/open-rl/disk-baseline")
+LORA_RANK = int(os.getenv("LORA_RANK", "16"))
+# FLUSH_CACHES=1 removes page-cache flattery: sync after save (real write
+# cost) and drop caches before load (real read cost). Needs a privileged pod.
+FLUSH_CACHES = os.getenv("FLUSH_CACHES", "0") == "1"
+
+
+def _flush_page_cache():
+  try:
+    with open("/proc/sys/vm/drop_caches", "w") as f:
+      f.write("3")
+    return True
+  except OSError:
+    return False
 
 metrics = MetricsWriter()
 failures: list[str] = []
@@ -60,6 +73,8 @@ def swap_out_disk(worker, tenant: str) -> dict:
 
   t0 = time.monotonic()
   worker.save_state(tenant, path, include_optimizer=True)
+  if FLUSH_CACHES:
+    os.sync()  # charge the real write to the save, not the page cache
   save_ms = (time.monotonic() - t0) * 1000
 
   free_before = torch.cuda.mem_get_info()[0]
@@ -82,6 +97,8 @@ def swap_out_disk(worker, tenant: str) -> dict:
 
 def swap_in_disk(worker, tenant: str) -> dict:
   path = os.path.join(STATE_ROOT, tenant)
+  if FLUSH_CACHES and not _flush_page_cache():
+    print("[disk-baseline] WARNING: could not drop caches; load will be cache-warm")
   t0 = time.monotonic()
   worker.load_from_state(tenant, path, restore_optimizer=True)
   torch.cuda.synchronize()
@@ -91,10 +108,10 @@ def swap_in_disk(worker, tenant: str) -> dict:
 
 
 def main() -> int:
-  print(f"[disk-baseline] loading {BASE_MODEL} + 2 tenants (rank 16), state root {STATE_ROOT}")
+  print(f"[disk-baseline] loading {BASE_MODEL} + 2 tenants (rank {LORA_RANK}), state root {STATE_ROOT}, flush={FLUSH_CACHES}")
   os.makedirs(STATE_ROOT, exist_ok=True)
   worker = LoraTrainingWorker()
-  cfg = LoraConfig(rank=16, seed=0)
+  cfg = LoraConfig(rank=LORA_RANK, seed=0)
   worker.create_model(BASE_MODEL, "tenant-A", cfg)
   worker.create_adapter("tenant-B", cfg)
   for tenant in ("tenant-A", "tenant-B"):
@@ -142,6 +159,7 @@ def main() -> int:
     return sorted(v)[len(v) // 2] if v else float("nan")
 
   summary = {"event": "disk_baseline_summary", "mode": "disk_baseline", "model": BASE_MODEL,
+             "rank": LORA_RANK, "flush_caches": FLUSH_CACHES,
              "cycles": CYCLES, "swap_out_p50_ms": round(p50(outs), 1), "swap_in_p50_ms": round(p50(ins), 1),
              "n_out": len(outs), "n_in": len(ins), "failures": len(failures)}
   metrics.emit(**summary)

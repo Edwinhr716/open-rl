@@ -147,6 +147,37 @@ def chart_switch_strategies():
           f'<line x1="{left}" y1="0" x2="{left}" y2="{y}" stroke="var(--axis)"/>' + "".join(parts) + "</svg>")
 
 
+def chart_scale_test():
+  """Switch round-trip at two scales x two strategies. Snapshot = slot 1,
+  disk = slot 2 (same entity colors as the per-round charts)."""
+  st = d["scale_test"]
+  db = d["disk_baseline"]
+  groups = [
+    ("0.5B / rank 16", (d["swap_ops_p50"]["trainer_swap_out"] + d["swap_ops_p50"]["trainer_swap_in"]) / 1000,
+     (db["swap_out_p50_ms"] + db["swap_in_p50_ms"]) / 1000),
+    ("4B / rank 64", (st["snapshot"]["swap_out_ms"] + st["snapshot"]["swap_in_ms"]) / 1000,
+     (st["disk_baseline"]["swap_out_p50_ms"] + st["disk_baseline"]["swap_in_p50_ms"]) / 1000),
+  ]
+  mx = max(max(s, b) for _, s, b in groups)
+  w, h, pad_b, pad_t, left = 950, 210, 24, 8, 40
+  gw = (w - left - 20) / len(groups)
+  bw = 60
+  parts = [f'<line x1="{left}" y1="{h - pad_b}" x2="{w - 10}" y2="{h - pad_b}" stroke="var(--axis)"/>']
+  for gl in (0.5, 1.0):
+    gy = h - pad_b - (h - pad_b - pad_t) * gl
+    parts.append(f'<line x1="{left}" y1="{gy}" x2="{w - 10}" y2="{gy}" stroke="var(--grid)"/>')
+    parts.append(f'<text x="{left - 4}" y="{gy + 4}" text-anchor="end">{mx * gl:.0f}s</text>')
+  for i, (label, s, b) in enumerate(groups):
+    gx = left + 40 + i * gw
+    for j, (v, color, name) in enumerate([(s, "var(--series-1)", "snapshot swap"), (b, "var(--series-2)", "disk round-trip")]):
+      bh = max(2, (h - pad_b - pad_t) * v / mx)
+      x = gx + j * (bw + 2)
+      parts.append(rbar_v(x, h - pad_b - bh, bw, bh, color, f"{label} {name}: {v:.1f}s round-trip"))
+      parts.append(f'<text class="val" x="{x + bw / 2}" y="{h - pad_b - bh - 5}" text-anchor="middle">{v:.1f}s</text>')
+    parts.append(f'<text class="cat" x="{gx + bw + 1}" y="{h - pad_b + 15}" text-anchor="middle">{label}</text>')
+  return (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Tenant switch round-trip vs model scale">' + "".join(parts) + "</svg>")
+
+
 def chart_vram():
   vals = d["vram_freed_mb"]
   mx = max(vals)
@@ -233,6 +264,19 @@ PEFT module rebuild, address stability — need sub-block dumps and/or slower sh
 to dominate. Disk numbers include page-cache absorption; network filesystems (Filestore/NFS) shift the
 disk path right, not the snapshot path.</p></div>
 
+<div class="card"><h2 style="margin-top:0">The crossover: switch round-trip vs model scale</h2>
+<div class="legend"><span style="--c:var(--series-1)">snapshot agent swap</span><span style="--c:var(--series-2)">disk round-trip (save_state + load_from_state)</span></div>
+{chart_scale_test()}
+<p class="note">Measured 2026-08-04 on the same L4 node. At 0.5B/rank-16 the disk path wins ~2x (and its
+number is cache-warm — flattering). At {d["scale_test"]["model"].split("/")[-1]}/rank-64 with cache-honest I/O
+(sync + drop_caches), the disk path degrades to {(d["scale_test"]["disk_baseline"]["swap_out_p50_ms"] + d["scale_test"]["disk_baseline"]["swap_in_p50_ms"]) / 1000:.1f}s
+while the snapshot swap holds at {(d["scale_test"]["snapshot"]["swap_out_ms"] + d["scale_test"]["snapshot"]["swap_in_ms"]) / 1000:.1f}s —
+<b>a {(d["scale_test"]["disk_baseline"]["swap_out_p50_ms"] + d["scale_test"]["disk_baseline"]["swap_in_p50_ms"]) / (d["scale_test"]["snapshot"]["swap_out_ms"] + d["scale_test"]["snapshot"]["swap_in_ms"]):.1f}x win for the snapshot agent</b>,
+freeing {d["scale_test"]["snapshot"]["vram_freed_mb"] / 1000:.1f}GB of VRAM per parked tenant (all
+{d["scale_test"]["snapshot"]["tensors_verified"]} tensors bitwise-verified, write-after-restore intact). Block
+amplification shrinks naturally with tensor size (~20x at rank 16 → ~1.6x at rank 64), while the disk path
+scales with real bytes through serialization and storage — network filesystems widen the gap further.</p></div>
+
 <div class="card"><h2 style="margin-top:0">Physical VRAM freed per trainer swap-out</h2>
 {chart_vram()}
 <p class="note">Every parked tenant returns its adapter + AdamW optimizer state to the pool
@@ -250,10 +294,13 @@ swap cycle. (Tenant-B degraded to deterministic token-0 output in snapshot mode 
 <ol style="font-size:13px;color:var(--ink-2);margin:6px 0 2px;padding-left:18px">
 <li><b>The mechanism is correct</b> — raw GPU-memory snapshot/restore of live vLLM LoRA slots and live
 trainer adapter+optimizer state is bit-stable, including optimizer steps <i>after</i> restore.</li>
-<li><b>Under resource pressure, disk multiplexing wins at this scale</b> — the honest constrained baseline
-(save_state + load_from_state) round-trips in ~{(d["disk_baseline"]["swap_out_p50_ms"] + d["disk_baseline"]["swap_in_p50_ms"]) / 1000:.1f}s
-vs the snapshot switch's {d["swap_ops_p50"]["trainer_switch"] / 1000:.1f}s, because it moves only the real
-{d["disk_baseline"]["state_mb"]:.0f}MB of state while GPU-CR moves ~2GB of 2MB-aligned blocks.</li>
+<li><b>The winner depends on scale, and the crossover is measured</b> — at 0.5B/rank-16 the disk baseline
+round-trips in ~{(d["disk_baseline"]["swap_out_p50_ms"] + d["disk_baseline"]["swap_in_p50_ms"]) / 1000:.1f}s (cache-warm)
+vs the snapshot switch's {d["swap_ops_p50"]["trainer_switch"] / 1000:.1f}s; at 4B/rank-64 with honest I/O the disk
+path takes {(d["scale_test"]["disk_baseline"]["swap_out_p50_ms"] + d["scale_test"]["disk_baseline"]["swap_in_p50_ms"]) / 1000:.1f}s vs the
+snapshot swap's {(d["scale_test"]["snapshot"]["swap_out_ms"] + d["scale_test"]["snapshot"]["swap_in_ms"]) / 1000:.1f}s —
+a {(d["scale_test"]["disk_baseline"]["swap_out_p50_ms"] + d["scale_test"]["disk_baseline"]["swap_in_p50_ms"]) / (d["scale_test"]["snapshot"]["swap_out_ms"] + d["scale_test"]["snapshot"]["swap_in_ms"]):.1f}x
+snapshot win at production-like state sizes, before network storage widens it further.</li>
 <li><b>Block granularity is the whole ballgame</b> — ~20× data amplification on the trainer, ~48× on the
 sampler; it also inflates the resident footprint itself (the no-caching-allocator requirement turns ~330MB
 of packed tensors into ~2GB of blocks). Upstream sub-block dumps would flip both the latency and footprint

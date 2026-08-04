@@ -27,6 +27,7 @@ from training.timeslice_tenant import TimesliceTenantManager
 
 BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-0.5B")
 ROUNDS = int(os.getenv("TIMESLICE_SELFTEST_ROUNDS", "3"))
+LORA_RANK = int(os.getenv("LORA_RANK", "16"))
 
 failures: list[str] = []
 
@@ -57,9 +58,9 @@ def tenant_tensors(worker, tenant):
 
 
 def main() -> int:
-  print(f"[gate-b] loading {BASE_MODEL} + 2 tenants (rank 16)")
+  print(f"[gate-b] loading {BASE_MODEL} + 2 tenants (rank {LORA_RANK})")
   worker = LoraTrainingWorker()
-  cfg = LoraConfig(rank=16, seed=0)
+  cfg = LoraConfig(rank=LORA_RANK, seed=0)
   worker.create_model(BASE_MODEL, "tenant-A", cfg)
   worker.create_adapter("tenant-B", cfg)
 
@@ -124,6 +125,7 @@ def main() -> int:
   summary = {
     "event": "gate_b_summary",
     "model": BASE_MODEL,
+    "rank": LORA_RANK,
     "regions": n_regions,
     "vram_freed_mb": round(freed_mb, 1),
     "swap_out_ms": round(out_ms, 1),

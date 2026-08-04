@@ -1,0 +1,77 @@
+# Phase 2 Gate B: trainer-side tenant swap correctness + VRAM reclaim.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trainer-swap-gate-unrounded
+  labels:
+    app: trainer-swap-gate
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: trainer-swap-gate
+        snapshot-agent: "true"
+        timeslice.io/job-id: "trainer-swap-gate"
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-c
+      hostIPC: true
+      hostPID: true
+      containers:
+      - name: trainer
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v10-unrounded
+        command: ["python3", "scripts/test_trainer_swap.py"]
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: Always
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: AGENT_ENDPOINT
+          value: "$(NODE_IP):9001"
+        - name: JOB_ID
+          value: "trainer-swap-gate"
+        - name: BASE_MODEL
+          value: "Qwen/Qwen2.5-0.5B"
+        - name: TIMESLICE_SELFTEST_ROUNDS
+          value: "3"
+        - name: ENABLE_GRADIENT_CHECKPOINTING
+          value: "0"
+        - name: GPU_VENDOR
+          value: "NVIDIA"
+        - name: LD_PRELOAD
+          value: "/usr/local/lib/vGPU-NVIDIA.so"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        - name: PYTORCH_NO_CUDA_MEMORY_CACHING
+          value: "1"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "1"
+        volumeMounts:
+        - name: huge-ckpt
+          mountPath: /mnt/huge-ckpt
+          mountPropagation: HostToContainer
+        resources:
+          requests:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - name: huge-ckpt
+        hostPath:
+          path: /var/tmp/huge-ckpt
+          type: DirectoryOrCreate
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"

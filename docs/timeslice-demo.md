@@ -238,6 +238,20 @@ tenant, the real product scenario — measured with
 | Disk round-trip (`save_state`+`load_from_state`) | **1440ms** (790 out / 651 in) | 101MB serialized | tenant's real footprint |
 | Snapshot agent swap (GPU-CR) | 2865ms | ~2GB (2MB blocks) | ~2.07GB (incl. block bloat) |
 
+**The scale test — where the verdict flips** (Qwen3-4B-Instruct-2507,
+rank 64, ~1502 regions, same L4; disk numbers cache-honest via
+`FLUSH_CACHES=1`, i.e. `sync` after save + `drop_caches` before load):
+
+| Strategy at 4B/rank-64 | Round-trip p50 | Notes |
+|---|---|---|
+| Disk round-trip | **18.1s** (9.4s out / 8.7s in) | scales with real bytes × storage speed + serialization + PEFT rebuild |
+| Snapshot agent swap | **5.3s** (3.6s out / 1.7s in) | **3.4x faster**; frees 3.8GB VRAM/tenant; 1512 tensors bitwise-verified; block amplification naturally shrinks to ~1.6x at rank 64 |
+
+The crossover is real and measured: disk multiplexing wins at toy scale
+(~2x), the snapshot agent wins at production-like state sizes (~3.4x on
+node-local disk — network filesystems widen it), and the VRAM story holds
+at both scales.
+
 **Conclusions:**
 
 1. **The mechanism is correct.** Raw GPU-memory snapshot/restore of live

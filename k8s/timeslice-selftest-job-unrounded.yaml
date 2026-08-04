@@ -1,0 +1,86 @@
+# Phase 1 gate: TimeSlice sampler self-test (A/B hijack correctness + swap
+# latency). Apply with TIMESLICE_ENABLED=1 (snapshot mode), then edit the env
+# and job name to run the disk-reload baseline for comparison.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: timeslice-selftest-snapshot-unrounded
+  labels:
+    app: timeslice-selftest
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: timeslice-selftest
+        snapshot-agent: "true"
+        timeslice.io/job-id: "timeslice-selftest"
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-c
+      hostIPC: true
+      hostPID: true
+      containers:
+      - name: sampler
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v10-unrounded
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: Always
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: AGENT_ENDPOINT
+          value: "$(NODE_IP):9001"
+        - name: JOB_ID
+          value: "timeslice-selftest"
+        - name: BASE_MODEL
+          value: "facebook/opt-125m"
+        - name: TIMESLICE_ENABLED
+          value: "1"
+        - name: TIMESLICE_SELFTEST
+          value: "1"
+        - name: TIMESLICE_SELFTEST_ROUNDS
+          value: "5"
+        - name: VLLM_GPU_MEMORY_UTILIZATION
+          value: "0.4"
+        - name: GPU_VENDOR
+          value: "NVIDIA"
+        - name: LD_PRELOAD
+          value: "/usr/local/lib/vGPU-NVIDIA.so"
+        - name: VLLM_ENABLE_V1_MULTIPROCESSING
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        - name: PYTORCH_NO_CUDA_MEMORY_CACHING
+          value: "1"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "1"
+        - name: VLLM_ALLOW_INSECURE_SERIALIZATION
+          value: "1"
+        volumeMounts:
+        - name: huge-ckpt
+          mountPath: /mnt/huge-ckpt
+          mountPropagation: HostToContainer
+        resources:
+          requests:
+            memory: "4Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "4Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - name: huge-ckpt
+        hostPath:
+          path: /var/tmp/huge-ckpt
+          type: DirectoryOrCreate
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"

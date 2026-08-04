@@ -1,0 +1,97 @@
+# Gate B variant: demo op order + real forward_backward grads (tenant-B NaN chase).
+# Prereq: kubectl create configmap gate-b-real --from-file=scripts/test_trainer_swap_realgrads.py
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trainer-swap-gate-realgrads
+  labels:
+    app: trainer-swap-gate-realgrads
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: trainer-swap-gate-realgrads
+        snapshot-agent: "true"
+        timeslice.io/job-id: "trainer-swap-gate-realgrads"
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
+      hostIPC: true
+      hostPID: true
+      containers:
+      - name: trainer
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        command: ["python3", "/repro/test_trainer_swap_realgrads.py"]
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: AGENT_ENDPOINT
+          value: "$(NODE_IP):9001"
+        - name: JOB_ID
+          value: "trainer-swap-gate-realgrads"
+        - name: BASE_MODEL
+          value: "Qwen/Qwen2.5-0.5B"
+        - name: ROUNDS
+          value: "4"
+        - name: WARMUP_ROUNDS
+          value: "1"
+        - name: LEARNING_RATE
+          value: "3e-3"
+        - name: ENABLE_GRADIENT_CHECKPOINTING
+          value: "0"
+        - name: GPU_VENDOR
+          value: "NVIDIA"
+        - name: LD_PRELOAD
+          value: "/usr/local/lib/vGPU-NVIDIA.so"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        - name: PYTORCH_NO_CUDA_MEMORY_CACHING
+          value: "1"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "1"
+        - name: TIMESLICE_METRICS_PATH
+          value: "/mnt/open-rl/metrics/gate-b-real-metrics.jsonl"
+        - name: GATE_LOG
+          value: "/mnt/open-rl/metrics/gate-b-real-warmup.log"
+        volumeMounts:
+        - name: huge-ckpt
+          mountPath: /mnt/huge-ckpt
+          mountPropagation: HostToContainer
+        - name: repro
+          mountPath: /repro
+        - name: open-rl
+          mountPath: /mnt/open-rl
+        resources:
+          requests:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - name: huge-ckpt
+        hostPath:
+          path: /var/tmp/huge-ckpt
+          type: DirectoryOrCreate
+      - name: repro
+        configMap:
+          name: gate-b-real
+      - name: open-rl
+        hostPath:
+          path: /var/tmp/open-rl
+          type: DirectoryOrCreate
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
