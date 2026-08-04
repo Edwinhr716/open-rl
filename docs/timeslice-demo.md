@@ -183,6 +183,14 @@ Driver knobs (env on the Job): `ROUNDS` (default 8), `LEARNING_RATE`
 
 ## 3. Viewing the results
 
+**Visual report:** `docs/timeslice-demo-report.html` is a self-contained page
+(no external assets, light/dark aware) with the stat tiles, swap-latency
+chart, per-round snapshot-vs-baseline comparisons, the VRAM-freed chart, and
+the token-convergence table — open it directly in a browser, serve it with
+`python3 -m http.server -d docs`, or host it anywhere static. Regenerate it
+from a new run's data with `scripts/timeslice_visual_report.py` (dataset
+format: `docs/data/timeslice-run-<date>.json`).
+
 1. **Driver log** — the run's narrative: per-round `train_round` / `sample`
    wall times, the sampled tokens (watch tenant-A converge to `420`),
    tripwire checks, and the final `PASSED`/`FAILED` verdict:
