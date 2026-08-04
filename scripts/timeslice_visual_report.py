@@ -125,6 +125,28 @@ def grouped_rounds(title_a, snap, base, unit=1000.0, fmt="{:.1f}s"):
   return (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{title_a}">' + "".join(parts) + "</svg>")
 
 
+def chart_switch_strategies():
+  """Trainer tenant switch, three ways: stay resident / disk round-trip /
+  snapshot swap. One measure (ms) -> single hue; strategy named by label."""
+  db = d["disk_baseline"]
+  disk_rt = db["swap_out_p50_ms"] + db["swap_in_p50_ms"]
+  snap_rt = d["swap_ops_p50"]["trainer_switch"]
+  rows_data = [("Stay resident (unconstrained)", 0, "0 ms — but VRAM grows ~linearly per tenant"),
+               ("Disk round-trip (save_state + load_from_state)", disk_rt, f"{disk_rt:,.0f}ms p50 — moves {db['state_mb']:.0f}MB serialized state"),
+               ("Snapshot agent swap (GPU-CR)", snap_rt, f"{snap_rt:,.0f}ms p50 — moves ~2GB (2MB-block amplification)")]
+  mx = max(v for _, v, _ in rows_data) or 1
+  left, bw, gap, w = 320, 18, 12, 950
+  parts, y = [], 8
+  for name, v, tipv in rows_data:
+    bl = max(2, (w - left - 100) * v / mx)
+    parts.append(f'<text class="cat" x="{left - 8}" y="{y + 13}" text-anchor="end">{name}</text>')
+    parts.append(rbar_h(left, y, bl, bw, "var(--series-1)", tipv))
+    parts.append(f'<text class="val" x="{left + bl + 6}" y="{y + 13}">{v:,.0f} ms</text>')
+    y += bw + gap
+  return (f'<svg viewBox="0 0 {w} {y + 4}" role="img" aria-label="Tenant switch strategies compared">'
+          f'<line x1="{left}" y1="0" x2="{left}" y2="{y}" stroke="var(--axis)"/>' + "".join(parts) + "</svg>")
+
+
 def chart_vram():
   vals = d["vram_freed_mb"]
   mx = max(vals)
@@ -199,6 +221,18 @@ plus GPU-CR's required CUDA_LAUNCH_BLOCKING/eager taxes.</p>
 (swap-out ~1.9s + swap-in ~1.0s) that buys the VRAM release below.</p>
 <details><summary>Data table</summary>{table(["round", "snapshot", "baseline"], rounds_rows(snap_train, base_train))}</details></div>
 
+<div class="card"><h2 style="margin-top:0">Trainer tenant switch — three strategies (p50 round-trip)</h2>
+{chart_switch_strategies()}
+<p class="note">The resource-constrained comparison: when VRAM cannot hold every tenant, the alternatives are
+Open-RL's disk eviction (save_state + load_from_state, measured here without GPU-CR's env taxes:
+save {d["disk_baseline"]["save_p50_ms"]:,.0f}ms + evict {d["disk_baseline"]["evict_p50_ms"]:,.0f}ms out,
+{d["disk_baseline"]["swap_in_p50_ms"]:,.0f}ms back, {d["disk_baseline"]["state_mb"]:.0f}MB on node-local disk)
+or the snapshot agent. At this scale the disk path wins ~2x: GPU-CR moves ~20x more bytes than the real state
+(2MB-block granularity). The snapshot path's structural advantages — RAM-speed staging, no serialization or
+PEFT module rebuild, address stability — need sub-block dumps and/or slower shared storage + bigger states
+to dominate. Disk numbers include page-cache absorption; network filesystems (Filestore/NFS) shift the
+disk path right, not the snapshot path.</p></div>
+
 <div class="card"><h2 style="margin-top:0">Physical VRAM freed per trainer swap-out</h2>
 {chart_vram()}
 <p class="note">Every parked tenant returns its adapter + AdamW optimizer state to the pool
@@ -216,11 +250,16 @@ swap cycle. (Tenant-B degraded to deterministic token-0 output in snapshot mode 
 <ol style="font-size:13px;color:var(--ink-2);margin:6px 0 2px;padding-left:18px">
 <li><b>The mechanism is correct</b> — raw GPU-memory snapshot/restore of live vLLM LoRA slots and live
 trainer adapter+optimizer state is bit-stable, including optimizer steps <i>after</i> restore.</li>
-<li><b>The value is the VRAM curve, not per-op latency</b> — snapshot mode holds VRAM constant
-(~{vram_p50 / 1000:.1f} GB back per parked tenant) while baseline grows linearly with tenants; at 2 tenants
-baseline wins wall-clock, and the crossover arrives with tenant count and model scale.</li>
-<li><b>The dominant overhead is GPU-CR's 2MB block granularity</b> — ~288MB moved for ~6MB of sampler
-weights, ~2GB for ~330MB of trainer state; upstream sub-block dumps would cut data moved ~60×.</li>
+<li><b>Under resource pressure, disk multiplexing wins at this scale</b> — the honest constrained baseline
+(save_state + load_from_state) round-trips in ~{(d["disk_baseline"]["swap_out_p50_ms"] + d["disk_baseline"]["swap_in_p50_ms"]) / 1000:.1f}s
+vs the snapshot switch's {d["swap_ops_p50"]["trainer_switch"] / 1000:.1f}s, because it moves only the real
+{d["disk_baseline"]["state_mb"]:.0f}MB of state while GPU-CR moves ~2GB of 2MB-aligned blocks.</li>
+<li><b>Block granularity is the whole ballgame</b> — ~20× data amplification on the trainer, ~48× on the
+sampler; it also inflates the resident footprint itself (the no-caching-allocator requirement turns ~330MB
+of packed tensors into ~2GB of blocks). Upstream sub-block dumps would flip both the latency and footprint
+comparisons; RAM-speed staging, zero serialization/rebuild cost, and address stability are the structural
+advantages waiting behind that fix — and they grow with model scale and slower shared storage, where the
+disk path degrades and the snapshot path does not.</li>
 </ol></div>
 
 <p class="note">Generated by scripts/timeslice_visual_report.py from docs/data/timeslice-run-{meta["date"]}.json.

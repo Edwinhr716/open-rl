@@ -220,7 +220,7 @@ format: `docs/data/timeslice-run-<date>.json`).
 Per-round numbers, Qwen2.5-0.5B, rank-16 LoRA, NVIDIA L4 (driver + metrics
 from the 2026-08-04 runs; snapshot mode 8 full rounds, baseline 6):
 
-| Metric | Snapshot mode | Baseline |
+| Metric | Snapshot mode | Baseline (all resident) |
 |---|---|---|
 | Sampler request incl. adapter switch | ~3.4–3.6s | ~2.3–2.4s |
 | Trainer round (fb + optim + save) | ~10.8s | ~8.0s |
@@ -228,26 +228,42 @@ from the 2026-08-04 runs; snapshot mode 8 full rounds, baseline 6):
 | Sampler restore / snapshot op | 388ms / 737ms p50 | n/a (disk reload) |
 | **Physical VRAM freed per parked tenant** | **~2.07GB (15/15 swaps)** | **0** |
 
+**The resource-constrained comparison** (when VRAM *cannot* hold every
+tenant, the real product scenario — measured with
+`scripts/test_trainer_disk_baseline.py`, no GPU-CR env taxes):
+
+| Trainer tenant switch strategy | Round-trip p50 | Data moved | VRAM back |
+|---|---|---|---|
+| Stay resident (unconstrained only) | 0 | 0 | 0 |
+| Disk round-trip (`save_state`+`load_from_state`) | **1440ms** (790 out / 651 in) | 101MB serialized | tenant's real footprint |
+| Snapshot agent swap (GPU-CR) | 2865ms | ~2GB (2MB blocks) | ~2.07GB (incl. block bloat) |
+
 **Conclusions:**
 
 1. **The mechanism is correct.** Raw GPU-memory snapshot/restore of live
    vLLM LoRA slots and live trainer adapter+optimizer state is bit-stable
    across many cycles — including `optim_step` *after* restore, GPU-CR's
    historically risky write-after-restore path.
-2. **The value is the VRAM curve, not per-op latency.** Baseline keeps every
-   tenant resident: VRAM grows ~2GB per tenant (adapter + AdamW at 2MB-block
-   granularity) on a 24GB L4 that also carries the base model — a hard
-   ceiling of a handful of tenants. Snapshot mode keeps VRAM constant and
-   pays ~2.9s per trainer tenant switch and ~1.1s per sampler switch. At two
-   tenants baseline wins on wall clock; the crossover arrives with more
-   tenants and bigger models, exactly where residency stops being an option.
-3. **The dominant overhead is block-granularity, not the mechanism.** GPU-CR
-   checkpoints whole 2MB-aligned allocations: 144 sampler regions ⇒ ~288MB
-   moved for ~6MB of rank-16 weights; ~1000 trainer tensors ⇒ ~2GB per
-   swap. Sub-block dumps (upstream GPU-CR work) would cut data moved ~60x
-   and collapse the latency gap. Secondary tax: GPU-CR hard-requires
-   `CUDA_LAUNCH_BLOCKING=1` + no CUDA caching allocator + eager mode, which
-   slows both training and generation regardless of swapping.
+2. **Under resource pressure, the disk path wins at this scale.** Against
+   the honest constrained baseline (Open-RL's own `save_state` +
+   `load_from_state` eviction), the snapshot switch is ~2x slower today —
+   because it moves ~20x more bytes than the real state. The unconstrained
+   "all resident" comparison flatters neither direction: it answers a
+   scenario where no multiplexing is needed at all.
+3. **Block granularity is the whole ballgame.** GPU-CR checkpoints whole
+   2MB-aligned allocations: 144 sampler regions ⇒ ~288MB moved for ~6MB of
+   rank-16 weights; ~1000 trainer tensors ⇒ ~2GB per swap for 101MB of
+   serializable state. The required no-caching-allocator setting also
+   inflates the *resident* footprint (~330MB of packed tensors become ~2GB
+   of blocks), so part of the "VRAM freed" is bloat the mechanism itself
+   introduced. Upstream sub-block dumps would flip both the latency and the
+   footprint comparisons; the snapshot path's structural advantages —
+   RAM-speed staging, zero serialization/PEFT-rebuild cost, address
+   stability — grow with model scale and slower shared storage
+   (Filestore/NFS), where the disk path degrades and the snapshot path does
+   not. Secondary tax either way: GPU-CR hard-requires
+   `CUDA_LAUNCH_BLOCKING=1` + eager mode, slowing training and generation
+   regardless of swapping.
 4. **Operational discipline is part of the system.** Hugepage reservations
    attach to dump *files*, snapshot stores must be tenant-keyed and
    garbage-collected, and every workload restart needs the clean-slate

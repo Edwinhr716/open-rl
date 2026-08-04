@@ -1,0 +1,24 @@
+{"event": "disk_swap_out", "lora_id": "tenant-B", "mode": "disk_baseline", "save_ms": 731.6, "evict_ms": 23.8, "vram_freed_mb": 151.0, "state_mb": 101.0, "wall_ms": 755.3, "ts": 1785879169.1375933}
+{"event": "disk_switch", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 769.9, "ts": 1785879169.1377761}
+{"event": "disk_swap_in", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 724.7, "ts": 1785879170.5234926}
+{"event": "disk_swap_out", "lora_id": "tenant-A", "mode": "disk_baseline", "save_ms": 775.9, "evict_ms": 21.3, "vram_freed_mb": 90.2, "state_mb": 101.0, "wall_ms": 797.2, "ts": 1785879171.3228993}
+{"event": "disk_switch", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 1524.3, "ts": 1785879171.3230271}
+{"event": "disk_swap_in", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 677.6, "ts": 1785879172.6614234}
+{"event": "disk_swap_out", "lora_id": "tenant-B", "mode": "disk_baseline", "save_ms": 810.7, "evict_ms": 29.2, "vram_freed_mb": 62.9, "state_mb": 101.0, "wall_ms": 839.9, "ts": 1785879173.519662}
+{"event": "disk_switch", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 1536.0, "ts": 1785879173.519838}
+{"event": "disk_swap_in", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 609.8, "ts": 1785879174.7912104}
+{"event": "disk_swap_out", "lora_id": "tenant-A", "mode": "disk_baseline", "save_ms": 744.9, "evict_ms": 22.4, "vram_freed_mb": 81.8, "state_mb": 101.0, "wall_ms": 767.2, "ts": 1785879175.5767984}
+{"event": "disk_switch", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 1395.6, "ts": 1785879175.5769267}
+{"event": "disk_swap_in", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 621.8, "ts": 1785879176.854541}
+{"event": "disk_swap_out", "lora_id": "tenant-B", "mode": "disk_baseline", "save_ms": 754.3, "evict_ms": 36.7, "vram_freed_mb": 58.7, "state_mb": 101.0, "wall_ms": 791.0, "ts": 1785879177.664914}
+{"event": "disk_switch", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 1432.4, "ts": 1785879177.6650617}
+{"event": "disk_swap_in", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 698.6, "ts": 1785879179.0265121}
+{"event": "disk_swap_out", "lora_id": "tenant-A", "mode": "disk_baseline", "save_ms": 746.9, "evict_ms": 22.5, "vram_freed_mb": 77.6, "state_mb": 101.0, "wall_ms": 769.4, "ts": 1785879179.8157737}
+{"event": "disk_switch", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 1488.0, "ts": 1785879179.8159223}
+{"event": "disk_swap_in", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 650.7, "ts": 1785879181.1370583}
+{"event": "disk_swap_out", "lora_id": "tenant-B", "mode": "disk_baseline", "save_ms": 752.6, "evict_ms": 21.6, "vram_freed_mb": 58.7, "state_mb": 101.0, "wall_ms": 774.2, "ts": 1785879181.9305642}
+{"event": "disk_switch", "lora_id": "tenant-A", "mode": "disk_baseline", "wall_ms": 1444.4, "ts": 1785879181.93069}
+{"event": "disk_swap_in", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 645.9, "ts": 1785879183.2148054}
+{"event": "disk_swap_out", "lora_id": "tenant-A", "mode": "disk_baseline", "save_ms": 764.4, "evict_ms": 25.4, "vram_freed_mb": 73.4, "state_mb": 101.0, "wall_ms": 789.8, "ts": 1785879184.0279527}
+{"event": "disk_switch", "lora_id": "tenant-B", "mode": "disk_baseline", "wall_ms": 1459.2, "ts": 1785879184.0281067}
+{"event": "disk_baseline_summary", "mode": "disk_baseline", "model": "Qwen/Qwen2.5-0.5B", "cycles": 4, "swap_out_p50_ms": 789.8, "swap_in_p50_ms": 650.7, "n_out": 8, "n_in": 7, "failures": 0, "ts": 1785879184.6817827}

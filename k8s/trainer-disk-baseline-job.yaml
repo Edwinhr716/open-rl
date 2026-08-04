@@ -1,0 +1,59 @@
+# Multiplexed-baseline measurement: tenant switching via save_state /
+# load_from_state disk round-trips. Deliberately WITHOUT the GPU-CR
+# environment (no LD_PRELOAD, no CUDA_LAUNCH_BLOCKING, default caching
+# allocator, no hugepages) — the baseline's fair conditions.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trainer-disk-baseline
+  labels:
+    app: trainer-disk-baseline
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: trainer-disk-baseline
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trainer
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v9
+        command: ["python3", "scripts/test_trainer_disk_baseline.py"]
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: Always
+        env:
+        - name: BASE_MODEL
+          value: "Qwen/Qwen2.5-0.5B"
+        - name: CYCLES
+          value: "4"
+        - name: STATE_ROOT
+          value: "/mnt/open-rl/disk-baseline"
+        - name: TIMESLICE_METRICS_PATH
+          value: "/mnt/open-rl/metrics/disk-baseline.jsonl"
+        - name: ENABLE_GRADIENT_CHECKPOINTING
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        volumeMounts:
+        - name: open-rl
+          mountPath: /mnt/open-rl
+        resources:
+          requests:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "10Gi"
+            nvidia.com/gpu: "1"
+      volumes:
+      - name: open-rl
+        hostPath:
+          path: /var/tmp/open-rl
+          type: DirectoryOrCreate
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"

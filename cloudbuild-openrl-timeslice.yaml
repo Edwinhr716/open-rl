@@ -10,7 +10,7 @@ steps:
 images:
 - asia-southeast1-docker.pkg.dev/$PROJECT_ID/time-slicing/open-rl/timeslice-sampler:$_TAG
 substitutions:
-  _TAG: v8
+  _TAG: v9
 options:
   machineType: E2_HIGHCPU_32
   diskSizeGb: 200
