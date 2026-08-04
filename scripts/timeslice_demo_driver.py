@@ -116,7 +116,7 @@ def main() -> int:
 
   tenants = {}
   for name in ("tenant-A", "tenant-B"):
-    resp = post("create_model", {"base_model": BASE_MODEL, "lora_config": {"rank": 16, "seed": 0}})
+    resp = post("create_model", {"base_model": BASE_MODEL, "lora_config": {"rank": int(os.getenv("LORA_RANK", "16")), "seed": 0}})
     model_id = resp["request_id"]
     wait_future(model_id)
     tenants[name] = model_id

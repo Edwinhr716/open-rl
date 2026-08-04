@@ -211,5 +211,27 @@
    "failures": 0
   },
   "note": "disk numbers are cache-honest (sync after save, drop_caches before load); the 0.5B disk numbers were cache-warm"
+ },
+ "unrounded": {
+  "source": "GPU-CR branch unrounded-selective-dumps (ckpt_selective dumps alloc_size, not ROUND_UP_2MB); validated 2026-08-04 on pool rl-hugepages-l4-c, images gpucr-so:unrounded-v1 / timeslice-sampler:v10-unrounded",
+  "trainer_05b": {
+   "swap_out_ms": 693,
+   "swap_in_ms": 195,
+   "switch_ms_min": 249,
+   "switch_ms_max": 445,
+   "bytes_gb": 0.093,
+   "bytes_gb_before": 2.0,
+   "vram_freed_mb": 2087,
+   "bitwise": "1008/1008",
+   "optim_after_restore": true
+  },
+  "sampler": {
+   "dump_mb": 4.9,
+   "dump_mb_before": 288.0,
+   "switch_ms": 53,
+   "switch_ms_before": 193,
+   "determinism": "8/8"
+  },
+  "note": "4B/rank-64 with the unrounded patch not yet measured; remaining GPU-side floor is per-block release ~70-110ms + remap driver calls"
  }
 }

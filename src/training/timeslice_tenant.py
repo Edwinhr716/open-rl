@@ -145,9 +145,21 @@ class TimesliceTenantManager:
     if not self.enabled or prev == next_id:
       return
     t0 = _now_ms()
-    if prev is not None:
-      self.swap_out(prev)
-    self.swap_in(next_id)
+    # Restore the incoming tenant BEFORE checkpointing the outgoing one: the
+    # per-PID staging dump file is shared across snapshot groups, and GPU-CR's
+    # restore resolves offsets against the file's freshest extents — the
+    # out-then-in order deterministically transplants the outgoing tenant's
+    # bytes into a slice of the incoming tenant's optimizer blocks (negative
+    # values in exp_avg_sq -> AdamW sqrt(neg) -> NaN). Costs both tenants
+    # transiently resident during the switch.
+    if os.getenv("TIMESLICE_SWAP_IN_FIRST", "1") == "1":
+      self.swap_in(next_id)
+      if prev is not None:
+        self.swap_out(prev)
+    else:
+      if prev is not None:
+        self.swap_out(prev)
+      self.swap_in(next_id)
     self.metrics.emit(event="trainer_switch", lora_id=next_id, prev=prev, mode="snapshot", wall_ms=round(_now_ms() - t0, 1))
 
   def forget(self, model_id: str):
