@@ -163,6 +163,65 @@ def chart_sampler_ops():
           f'<line x1="{left}" y1="0" x2="{left}" y2="{y}" stroke="var(--axis)"/>' + "".join(parts) + "</svg>")
 
 
+def chart_convergence():
+  """Percent of temp-0 output tokens matching the tenant's target, per round.
+  Color = tenant (blue A / orange B); dash = run mode (solid snapshot,
+  dashed baseline)."""
+  cv = d["convergence"]
+  series = [("A snapshot", cv["snapshot"]["A"], S1, ""),
+            ("A baseline", cv["baseline"]["A"], S1, "5,4"),
+            ("B snapshot (pre-fix)", cv["snapshot"]["B"], S2, ""),
+            ("B baseline", cv["baseline"]["B"], S2, "5,4")]
+  n = max(len(v) for _, v, _, _ in series)
+  w, h, pad_b, pad_t, left = 950, 230, 26, 12, 46
+  xs = lambda i: left + 25 + i * (w - left - 60) / max(n - 1, 1)
+  ys = lambda v: h - pad_b - (h - pad_b - pad_t) * v / 100.0
+  parts = [f'<line x1="{left}" y1="{h - pad_b}" x2="{w - 10}" y2="{h - pad_b}" stroke="var(--axis)"/>']
+  for gl in (0, 50, 100):
+    parts.append(f'<line x1="{left}" y1="{ys(gl)}" x2="{w - 10}" y2="{ys(gl)}" stroke="var(--grid)"/>')
+    parts.append(f'<text x="{left - 4}" y="{ys(gl) + 4}" text-anchor="end">{gl}%</text>')
+  for i in range(n):
+    parts.append(f'<text x="{xs(i)}" y="{h - pad_b + 14}" text-anchor="middle">r{i}</text>')
+  for name, vals, color, dash in series:
+    pts = " ".join(f"{xs(i)},{ys(v)}" for i, v in enumerate(vals))
+    dd = f' stroke-dasharray="{dash}"' if dash else ""
+    parts.append(f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2"{dd}/>')
+    for i, v in enumerate(vals):
+      parts.append(f'<circle cx="{xs(i)}" cy="{ys(v)}" r="4" fill="{color}" data-tip="{name} round {i}: {v:.0f}% on-target"/>')
+    lx, ly = xs(len(vals) - 1) + 8, ys(vals[-1]) + 4
+    parts.append(f'<text class="cat" x="{lx}" y="{ly}">{name}</text>')
+  return (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Target-token convergence per round">' + "".join(parts) + "</svg>")
+
+
+def chart_timeline():
+  """Gantt of rounds 1-2: where the swaps actually happen."""
+  tl = d["timeline"]
+  t0, t1 = tl["t0"], tl["t1"]
+  lanes = ["trainer rounds", "trainer swap ops", "sampler requests", "sampler swap ops"]
+  w, lane_h, pad_t, left = 950, 34, 16, 130
+  h = pad_t + lane_h * len(lanes) + 30
+  xs = lambda t: left + (w - left - 15) * (t - t0) / (t1 - t0)
+  kind_color = {"train": S1, "sample": S1, "trainer_swap_out": S3, "trainer_swap_in": S3, "snapshot": S3, "restore": S3}
+  parts = []
+  for li, lane in enumerate(lanes):
+    y = pad_t + li * lane_h
+    parts.append(f'<line x1="{left}" y1="{y + lane_h - 6}" x2="{w - 10}" y2="{y + lane_h - 6}" stroke="var(--grid)"/>')
+    parts.append(f'<text class="cat" x="{left - 8}" y="{y + lane_h / 2 + 3}" text-anchor="end">{lane}</text>')
+  for ev in tl["events"]:
+    li = lanes.index(ev["lane"])
+    y = pad_t + li * lane_h + 4
+    x0, x1 = xs(max(ev["start"], t0)), xs(min(ev["end"], t1))
+    bw = max(x1 - x0, 2.5)
+    color = kind_color.get(ev["kind"], S3)
+    if ev["kind"] in ("train", "sample") and ev["tenant"] == "B":
+      color = S2
+    parts.append(f'<rect x="{x0:.1f}" y="{y}" width="{bw:.1f}" height="{lane_h - 14}" rx="3" fill="{color}" '
+                 f'data-tip="{ev["label"]} ({ev["end"] - ev["start"]:.1f}s)"/>')
+  for sec in range(0, int(t1 - t0) + 1, 10):
+    parts.append(f'<text x="{xs(t0 + sec)}" y="{h - 8}" text-anchor="middle">{sec}s</text>')
+  return (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Timeline of rounds 1-2 with swap operations">' + "".join(parts) + "</svg>")
+
+
 conv_rows = "".join(
   f'<tr><td>{i}</td><td>{sd["tenantA_tokens"][i]}{" <span class=ok>&#10003;</span>" if "420" in sd["tenantA_tokens"][i] else ""}</td>'
   f'<td>{sd["tenantB_tokens"][i]}</td></tr>' for i in range(len(sd["tenantA_tokens"])))
@@ -223,7 +282,25 @@ disk-reload alternative scales with adapter size and storage latency; the swap p
 <p class="sub">8 rounds × 2 tenants through the Tinker-compatible REST loop, swaps on both sides every round —
 0 failures, all tripwires green. Tenant-A locks its target (420) by round 2 and reproduces it bit-for-bit
 through six more rounds of interleaved tenant-B training: 15 trainer swap cycles, zero drift.</p>
-<table><tr><th>round</th><th>tenant-A tokens</th><th>tenant-B tokens</th></tr>{conv_rows}</table>
+<h2 style="margin-top:14px">Convergence per round</h2>
+<div class="legend"><span style="--c:{S1}">tenant-A (target 420)</span><span style="--c:{S2}">tenant-B (target 777)</span></div>
+{chart_convergence()}
+<p class="note">Solid = snapshot-mode run, dashed = baseline run. Tenant-A converges identically in both modes
+and holds 100% on-target through every swap cycle. Tenant-B's snapshot-mode flatline is the pre-fix
+swap-ordering bug shown below — in baseline it converges normally, and with the swap-in-first fix
+(TIMESLICE_SWAP_IN_FIRST=1) the real-gradients diagnostic shows healthy convergence under swapping.</p>
+
+<h2 style="margin-top:14px">Where the swaps happen — timeline of rounds 1–2</h2>
+<div class="legend"><span style="--c:{S1}">tenant-A work</span><span style="--c:{S2}">tenant-B work</span><span style="--c:{S3}">swap operations (agent)</span></div>
+{chart_timeline()}
+<p class="note">Reconstructed from event timestamps of the passed run ({d["timeline"]["note"]}). The pattern per
+round: a tenant's training batch triggers trainer swap ops at the tenant boundary (parked tenant restored,
+outgoing tenant checkpointed), then its sample triggers the sampler's slot save/restore just before
+generation. Hover any bar for the operation and duration; swap bars are hundreds of milliseconds inside
+~10s training rounds.</p>
+
+<details><summary>Raw tokens per round</summary>
+<table><tr><th>round</th><th>tenant-A tokens</th><th>tenant-B tokens</th></tr>{conv_rows}</table></details>
 <p class="note"><b>Tenant-B mystery — solved.</b> Its snapshot-mode-only NaN was traced to swap ordering: the
 per-PID staging dump file is shared across snapshot groups, and the old out-then-in order transplanted the
 outgoing tenant's bytes into a slice of the incoming tenant's optimizer blocks (negative exp_avg_sq →

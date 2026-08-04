@@ -233,5 +233,263 @@
    "determinism": "8/8"
   },
   "note": "4B/rank-64 with the unrounded patch not yet measured; remaining GPU-side floor is per-block release ~70-110ms + remap driver calls"
+ },
+ "timeline": {
+  "t0": 1785865800.0,
+  "t1": 1785865857.0,
+  "events": [
+   {
+    "lane": "sampler requests",
+    "kind": "sample",
+    "tenant": "B",
+    "start": 1785865796.3298001,
+    "end": 1785865800.128,
+    "label": "sample B r0"
+   },
+   {
+    "lane": "trainer rounds",
+    "kind": "train",
+    "tenant": "A",
+    "start": 1785865800.1285,
+    "end": 1785865810.845,
+    "label": "train A r1"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_out",
+    "tenant": "B",
+    "start": 1785865800.1394017,
+    "end": 1785865801.9794016,
+    "label": "swap_out B (1840ms)"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_in",
+    "tenant": "A",
+    "start": 1785865801.9798954,
+    "end": 1785865802.9000955,
+    "label": "swap_in A (920ms)"
+   },
+   {
+    "lane": "sampler requests",
+    "kind": "sample",
+    "tenant": "A",
+    "start": 1785865810.8448,
+    "end": 1785865814.194,
+    "label": "sample A r1"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "snapshot",
+    "tenant": "B",
+    "start": 1785865810.9024599,
+    "end": 1785865811.5393598,
+    "label": "snapshot B (637ms)"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "restore",
+    "tenant": "B",
+    "start": 1785865811.5395195,
+    "end": 1785865811.9275196,
+    "label": "restore B (388ms)"
+   },
+   {
+    "lane": "trainer rounds",
+    "kind": "train",
+    "tenant": "B",
+    "start": 1785865814.1947,
+    "end": 1785865824.905,
+    "label": "train B r1"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_out",
+    "tenant": "A",
+    "start": 1785865814.203303,
+    "end": 1785865816.144503,
+    "label": "swap_out A (1941ms)"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_in",
+    "tenant": "B",
+    "start": 1785865816.1450448,
+    "end": 1785865816.9629447,
+    "label": "swap_in B (818ms)"
+   },
+   {
+    "lane": "sampler requests",
+    "kind": "sample",
+    "tenant": "B",
+    "start": 1785865824.9044,
+    "end": 1785865828.377,
+    "label": "sample B r1"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "snapshot",
+    "tenant": "A",
+    "start": 1785865824.9630704,
+    "end": 1785865825.7004704,
+    "label": "snapshot A (737ms)"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "restore",
+    "tenant": "A",
+    "start": 1785865825.700692,
+    "end": 1785865826.0987918,
+    "label": "restore A (398ms)"
+   },
+   {
+    "lane": "trainer rounds",
+    "kind": "train",
+    "tenant": "A",
+    "start": 1785865828.3779,
+    "end": 1785865839.123,
+    "label": "train A r2"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_out",
+    "tenant": "B",
+    "start": 1785865828.3858376,
+    "end": 1785865830.3261375,
+    "label": "swap_out B (1940ms)"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_in",
+    "tenant": "A",
+    "start": 1785865830.3265877,
+    "end": 1785865831.2982876,
+    "label": "swap_in A (972ms)"
+   },
+   {
+    "lane": "sampler requests",
+    "kind": "sample",
+    "tenant": "A",
+    "start": 1785865839.1232002,
+    "end": 1785865842.594,
+    "label": "sample A r2"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "snapshot",
+    "tenant": "B",
+    "start": 1785865839.1741052,
+    "end": 1785865839.9145052,
+    "label": "snapshot B (740ms)"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "restore",
+    "tenant": "B",
+    "start": 1785865839.9147465,
+    "end": 1785865840.3204465,
+    "label": "restore B (406ms)"
+   },
+   {
+    "lane": "trainer rounds",
+    "kind": "train",
+    "tenant": "B",
+    "start": 1785865842.5941,
+    "end": 1785865853.293,
+    "label": "train B r2"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_out",
+    "tenant": "A",
+    "start": 1785865842.6021519,
+    "end": 1785865844.5432518,
+    "label": "swap_out A (1941ms)"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_in",
+    "tenant": "B",
+    "start": 1785865844.543655,
+    "end": 1785865845.464455,
+    "label": "swap_in B (921ms)"
+   },
+   {
+    "lane": "sampler requests",
+    "kind": "sample",
+    "tenant": "B",
+    "start": 1785865853.2929,
+    "end": 1785865856.724,
+    "label": "sample B r2"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "snapshot",
+    "tenant": "A",
+    "start": 1785865853.3504975,
+    "end": 1785865854.0345974,
+    "label": "snapshot A (684ms)"
+   },
+   {
+    "lane": "sampler swap ops",
+    "kind": "restore",
+    "tenant": "A",
+    "start": 1785865854.0348396,
+    "end": 1785865854.4491396,
+    "label": "restore A (414ms)"
+   },
+   {
+    "lane": "trainer swap ops",
+    "kind": "trainer_swap_out",
+    "tenant": "B",
+    "start": 1785865856.732792,
+    "end": 1785865858.673092,
+    "label": "swap_out B (1940ms)"
+   }
+  ],
+  "note": "rounds 1-2 of the passed 2026-08-04 full-stack run"
+ },
+ "convergence": {
+  "snapshot": {
+   "A": [
+    0.0,
+    33.333333333333336,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0
+   ],
+   "B": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "baseline": {
+   "A": [
+    0.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0
+   ],
+   "B": [
+    0.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0
+   ]
+  },
+  "metric": "percent of temp-0 output tokens equal to the tenant's target token"
  }
 }
