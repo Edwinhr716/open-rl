@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TimeSlice Scale Test — Qwen3-4B / rank 64</title><style>
+.viz-root { color-scheme: light;
+  --page:#f9f9f7; --surface-1:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --series-1:#2a78d6; --series-2:#eb6834; }
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark;
+    --page:#0d0d0d; --surface-1:#1a1a19; --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --series-1:#3987e5; --series-2:#d95926; } }
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page); color: var(--ink); margin: 0; padding: 24px; }
+.wrap { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 0 0 2px; }
+.sub { color: var(--ink-2); font-size: 13px; margin: 0 0 12px; }
+.hero { font-size: 44px; font-weight: 700; margin: 14px 0 2px; }
+.hero small { font-size: 15px; font-weight: 500; color: var(--ink-2); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: 12px; margin: 18px 0; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.tile .v { font-size: 24px; font-weight: 650; } .tile .k { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin: 10px 0; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin: 4px 0 8px; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+  margin-right: 5px; vertical-align: -1px; background: var(--c); }
+svg text { font-family: inherit; font-size: 11px; fill: var(--muted); }
+svg .val { fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+svg .cat { fill: var(--ink-2); }
+table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+th { color: var(--ink-2); font-weight: 600; }
+.note { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+ul.checks { font-size: 13px; color: var(--ink-2); margin: 6px 0 2px; padding-left: 18px; }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--page);
+  padding: 4px 8px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity .08s; z-index: 9; }
+</style></head>
+<body class="viz-root"><div class="wrap">
+<h1>TimeSlice Scale Test — Qwen3-4B-Instruct-2507 / rank 64</h1>
+<p class="sub">NVIDIA L4 · 1502 GPU regions (~1.9GB real tenant state: rank-64 adapter + AdamW) ·
+same node, same tenants, both strategies · disk I/O cache-honest (sync after save, drop_caches before load)</p>
+
+<div class="hero">3.4× <small>faster tenant switching with the snapshot agent at production-like state size</small></div>
+
+<div class="tiles">
+ <div class="tile"><div class="v">5.3s</div><div class="k">snapshot swap round-trip (3.6s out / 1.7s in)</div></div>
+ <div class="tile"><div class="v">18.1s</div><div class="k">disk round-trip: save_state + cold load_from_state</div></div>
+ <div class="tile"><div class="v">3.8 GB</div><div class="k">physical VRAM freed per parked tenant</div></div>
+ <div class="tile"><div class="v">1512/1512</div><div class="k">tensors bitwise-identical after restore; optim_step works post-restore</div></div>
+</div>
+
+<div class="card"><h2>The crossover</h2>
+<div class="legend"><span style="--c:var(--series-1)">snapshot agent swap</span><span style="--c:var(--series-2)">disk round-trip</span></div>
+<svg viewBox="0 0 860 230" role="img" aria-label="Tenant switch round-trip at two scales"><line x1="40" y1="204" x2="850" y2="204" stroke="var(--axis)"/><line x1="40" y1="107.0" x2="850" y2="107.0" stroke="var(--grid)"/><text x="36" y="111.0" text-anchor="end">9s</text><line x1="40" y1="10.0" x2="850" y2="10.0" stroke="var(--grid)"/><text x="36" y="14.0" text-anchor="end">18s</text><path d="M100.0,204.0 v-27.189531513127022 a4,4 0 0 1 4,-4 h62 a4,4 0 0 1 4,4 v27.189531513127022 z" fill="var(--series-1)" data-tip="0.5B / rank 16 snapshot swap: 2.9s (cache-warm disk)"/><text class="val" x="135.0" y="167.810468486873" text-anchor="middle">2.9s</text><path d="M172.0,204.0 v-11.429809789360352 a4,4 0 0 1 4,-4 h62 a4,4 0 0 1 4,4 v11.429809789360352 z" fill="var(--series-2)" data-tip="0.5B / rank 16 disk round-trip: 1.4s (cache-warm disk)"/><text class="val" x="207.0" y="183.57019021063965" text-anchor="middle">1.4s</text><text class="cat" x="171.0" y="219" text-anchor="middle">0.5B / rank 16</text><path d="M500.0,204.0 v-52.62595588438286 a4,4 0 0 1 4,-4 h62 a4,4 0 0 1 4,4 v52.62595588438286 z" fill="var(--series-1)" data-tip="4B / rank 64 snapshot swap: 5.3s (cache-honest disk)"/><text class="val" x="535.0" y="142.37404411561715" text-anchor="middle">5.3s</text><path d="M572.0,204.0 v-190.0 a4,4 0 0 1 4,-4 h62 a4,4 0 0 1 4,4 v190.0 z" fill="var(--series-2)" data-tip="4B / rank 64 disk round-trip: 18.1s (cache-honest disk)"/><text class="val" x="607.0" y="5.0" text-anchor="middle">18.1s</text><text class="cat" x="571.0" y="219" text-anchor="middle">4B / rank 64</text></svg>
+<p class="note">At 0.5B/rank-16 the disk path wins ~2× (and that measurement was cache-warm — flattering).
+At 4B/rank-64 the verdict flips to a 3.4× snapshot win: GPU-CR's 2MB-block amplification shrinks
+naturally with tensor size (~20× → ~1.6×) while the disk path grows with real bytes through torch
+serialization, storage bandwidth, and PEFT module rebuild. Numbers are node-local disk — network
+filesystems (Filestore/NFS) move only the disk bars.</p></div>
+
+<div class="card"><h2>Phase breakdown at 4B</h2>
+<svg viewBox="0 0 860 124" role="img" aria-label="Switch phase breakdown at 4B"><line x1="200" y1="0" x2="200" y2="120" stroke="var(--axis)"/><text class="cat" x="192" y="21" text-anchor="end">Snapshot swap-out</text><path d="M200,8 h219.1253860407659 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-219.1253860407659 z" fill="var(--series-1)" data-tip="Snapshot swap-out: 3.6s"/><text class="val" x="429.1253860407659" y="21">3.6s</text><text class="cat" x="192" y="49" text-anchor="end">Snapshot swap-in</text><path d="M200,36 h99.40333539221741 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-99.40333539221741 z" fill="var(--series-1)" data-tip="Snapshot swap-in: 1.7s"/><text class="val" x="309.4033353922174" y="49">1.7s</text><text class="cat" x="192" y="77" text-anchor="end">Disk save+sync (out)</text><path d="M200,64 h576.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-576.0 z" fill="var(--series-2)" data-tip="Disk save+sync (out): 9.4s"/><text class="val" x="786.0" y="77">9.4s</text><text class="cat" x="192" y="105" text-anchor="end">Disk cold load (in)</text><path d="M200,92 h534.6843730697962 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-534.6843730697962 z" fill="var(--series-2)" data-tip="Disk cold load (in): 8.7s"/><text class="val" x="744.6843730697962" y="105">8.7s</text></svg>
+<details><summary>Per-switch timings (snapshot mode)</summary><table><tr><th>switch</th><th>round-trip</th></tr><tr><td>switch #1</td><td>3.6s</td></tr><tr><td>switch #2</td><td>4.8s</td></tr><tr><td>switch #3</td><td>5.1s</td></tr></table></details></div>
+
+<div class="card"><h2>Correctness at scale</h2>
+<ul class="checks">
+<li>1512 tensors (adapter + AdamW state) bitwise-identical after swap-out/swap-in.</li>
+<li>optim_step after restore updates params — GPU-CR's write-after-restore path holds at 4B.</li>
+<li>0 failures across all switches.</li>
+<li>Caveat: this gate uses synthetic gradients; end-to-end convergence under swapping at 4B (and the
+tenant-B investigation) runs through the full-stack demo driver, not this job.</li>
+</ul></div>
+
+<p class="note">Generated by scripts/timeslice_scale_report.py from docs/data/timeslice-run-2026-08-04.json
+(scale_test section). Reproduce via docs/timeslice-demo.md §2 with BASE_MODEL=Qwen/Qwen3-4B-Instruct-2507,
+LORA_RANK=64, FLUSH_CACHES=1.</p>
+</div><div class="tip"></div><script>
+const tip = document.querySelector('.tip');
+document.querySelectorAll('[data-tip]').forEach(el => {
+  el.addEventListener('mousemove', e => { tip.textContent = el.dataset.tip;
+    tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1; });
+  el.addEventListener('mouseleave', () => tip.style.opacity = 0);
+});
+</script></body></html>
