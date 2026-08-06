@@ -50,7 +50,7 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v11-shm8
         command: ["python3", "-m", "uvicorn", "server.gateway:app", "--host", "0.0.0.0", "--port", "8000"]
         env:
         - {name: REDIS_URL, value: "redis://redis:6379"}
@@ -88,18 +88,20 @@ spec:
     spec:
       hostIPC: true
       hostPID: true
+      nodeSelector: {cloud.google.com/gke-nodepool: rl-hugepages-l4}
       containers:
       - name: sampler
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v11-shm8
         securityContext: {runAsUser: 0}
         env:
         - name: NODE_IP
           valueFrom: {fieldRef: {fieldPath: status.hostIP}}
         - {name: AGENT_ENDPOINT, value: "$(NODE_IP):9001"}
         - {name: JOB_ID, value: "openrl-sampler"}
-        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen3-4B-Instruct-2507"}
         - {name: TIMESLICE_ENABLED, value: "1"}
-        - {name: VLLM_GPU_MEMORY_UTILIZATION, value: "0.5"}
+        - {name: VLLM_GPU_MEMORY_UTILIZATION, value: "0.75"}
+        - {name: VLLM_MAX_LORA_RANK, value: "64"}
         - {name: SAMPLER_PORT, value: "8001"}
         - {name: GPU_VENDOR, value: "NVIDIA"}
         - {name: LD_PRELOAD, value: "/usr/local/lib/vGPU-NVIDIA.so"}
@@ -120,13 +122,13 @@ spec:
         - {name: open-rl, mountPath: /mnt/open-rl}
         resources:
           requests:
-            memory: "5Gi"
+            memory: "10Gi"
             nvidia.com/gpu: "1"
-            hugepages-2Mi: "28Gi"
+            hugepages-2Mi: "11Gi"
           limits:
-            memory: "5Gi"
+            memory: "10Gi"
             nvidia.com/gpu: "1"
-            hugepages-2Mi: "28Gi"
+            hugepages-2Mi: "11Gi"
       volumes:
       - {name: huge-ckpt, hostPath: {path: /var/tmp/huge-ckpt, type: DirectoryOrCreate}}
       - {name: open-rl, hostPath: {path: /var/tmp/open-rl, type: DirectoryOrCreate}}
@@ -160,9 +162,10 @@ spec:
     spec:
       hostIPC: true
       hostPID: true
+      nodeSelector: {cloud.google.com/gke-nodepool: rl-hugepages-l4}
       containers:
       - name: trainer
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v11-shm8
         command: ["python3", "-m", "server.training_requests_processor"]
         securityContext: {runAsUser: 0}
         env:
@@ -171,7 +174,7 @@ spec:
         - {name: AGENT_ENDPOINT, value: "$(NODE_IP):9001"}
         - {name: JOB_ID, value: "openrl-trainer"}
         - {name: REDIS_URL, value: "redis://redis.openrl-demo.svc.cluster.local:6379"}
-        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen3-4B-Instruct-2507"}
         - {name: TIMESLICE_TRAINER_ENABLED, value: "1"}
         - {name: OPEN_RL_TMP_DIR, value: "/mnt/open-rl"}
         - {name: ENABLE_GRADIENT_CHECKPOINTING, value: "0"}
@@ -187,13 +190,13 @@ spec:
         - {name: open-rl, mountPath: /mnt/open-rl}
         resources:
           requests:
-            memory: "8Gi"
+            memory: "11Gi"
             nvidia.com/gpu: "1"
-            hugepages-2Mi: "28Gi"
+            hugepages-2Mi: "11Gi"
           limits:
-            memory: "8Gi"
+            memory: "11Gi"
             nvidia.com/gpu: "1"
-            hugepages-2Mi: "28Gi"
+            hugepages-2Mi: "11Gi"
       volumes:
       - {name: huge-ckpt, hostPath: {path: /var/tmp/huge-ckpt, type: DirectoryOrCreate}}
       - {name: open-rl, hostPath: {path: /var/tmp/open-rl, type: DirectoryOrCreate}}

@@ -2,7 +2,7 @@
 # GPU-CR patch: identical except the preloader comes from the locally built
 # gpucr-so image (GPU-CR branch unrounded-selective-dumps + user-guide seds)
 # instead of the prebuilt on the llm-d GitHub branch.
-FROM asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/gpucr-so:unrounded-v1 AS gpucr
+FROM asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/gpucr-so:unrounded-shm8 AS gpucr
 
 FROM vllm/vllm-openai:v0.22.0
 

@@ -33,6 +33,7 @@ BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-0.5B")
 CYCLES = int(os.getenv("CYCLES", "4"))
 STATE_ROOT = os.getenv("STATE_ROOT", "/mnt/open-rl/disk-baseline")
 LORA_RANK = int(os.getenv("LORA_RANK", "16"))
+TENANTS = int(os.getenv("TENANTS", "2"))
 # FLUSH_CACHES=1 removes page-cache flattery: sync after save (real write
 # cost) and drop caches before load (real read cost). Needs a privileged pod.
 FLUSH_CACHES = os.getenv("FLUSH_CACHES", "0") == "1"
@@ -79,8 +80,9 @@ def swap_out_disk(worker, tenant: str) -> dict:
 
   free_before = torch.cuda.mem_get_info()[0]
   t0 = time.monotonic()
-  other = next(t for t in worker.adapter_states if t != tenant)
-  worker.peft_model.set_adapter(other)
+  other = next((t for t in worker.adapter_states if t != tenant), None)
+  if other is not None:
+    worker.peft_model.set_adapter(other)
   worker.peft_model.delete_adapter(tenant)
   worker.adapter_states.pop(tenant, None)
   torch.cuda.synchronize()
@@ -112,45 +114,56 @@ def main() -> int:
   os.makedirs(STATE_ROOT, exist_ok=True)
   worker = LoraTrainingWorker()
   cfg = LoraConfig(rank=LORA_RANK, seed=0)
-  worker.create_model(BASE_MODEL, "tenant-A", cfg)
-  worker.create_adapter("tenant-B", cfg)
-  for tenant in ("tenant-A", "tenant-B"):
+  names = [f"tenant-{i:03d}" for i in range(TENANTS)]
+  # Disk-multiplex capacity mode: create each tenant, give it optimizer
+  # state, then park the previous one so at most one stays resident.
+  worker.create_model(BASE_MODEL, names[0], cfg)
+  for i, tenant in enumerate(names):
+    if i > 0:
+      worker.create_adapter(tenant, cfg)
     fake_grads(worker, tenant)
     worker.optim_step({"learning_rate": 1e-4}, tenant)
+    if i > 0:
+      outs_boot = swap_out_disk(worker, names[i - 1])
+      free_mb = torch.cuda.mem_get_info()[0] / 1e6
+      metrics.emit(event="disk_tenant_added", tenant_count=i + 1, vram_free_mb=round(free_mb, 1))
+      print(f"[disk-baseline] tenant {i + 1}/{TENANTS} created, parked {names[i - 1]} ({outs_boot['wall_ms']:.0f}ms), vram_free={free_mb:.0f}MB")
   torch.cuda.synchronize()
 
-  ref = worker.adapter_states["tenant-A"]["trainable_params"][0].detach().cpu().clone()
+  ref = worker.adapter_states[names[-1]]["trainable_params"][0].detach().cpu().clone()
 
   outs, ins = [], []
-  parked = None  # multiplex: at most one tenant parked on disk at a time
+  parked = None  # names[-1] is resident; everyone else is on disk
+  active = names[-1]
   for c in range(CYCLES):
-    for tenant in ("tenant-A", "tenant-B"):
+    for tenant in names:
       t0 = time.monotonic()
-      if parked == tenant:
+      if tenant != active:
+        # restore first, then park: keeps a second adapter present for
+        # set_adapter during eviction (sole-resident case) at the cost of
+        # both tenants transiently resident (~3GB, fits headroom)
         ins.append(swap_in_disk(worker, tenant)["wall_ms"])
-        parked = None
-      other = "tenant-B" if tenant == "tenant-A" else "tenant-A"
-      if parked is None and other in worker.adapter_states:
-        outs.append(swap_out_disk(worker, other)["wall_ms"])
-        parked = other
+        outs.append(swap_out_disk(worker, active)["wall_ms"])
+        active = tenant
       metrics.emit(event="disk_switch", lora_id=tenant, mode="disk_baseline",
                    wall_ms=round((time.monotonic() - t0) * 1000, 1))
       fake_grads(worker, tenant)
       worker.optim_step({"learning_rate": 1e-4}, tenant)
       print(f"[disk-baseline] cycle {c} {tenant}: active, optim_step OK")
 
-  # Correctness: park A, reload, first param should differ from the ORIGINAL
-  # reference only by its training (sanity: reload restores what was saved).
-  if parked != "tenant-A" and "tenant-A" in worker.adapter_states:
-    saved = worker.adapter_states["tenant-A"]["trainable_params"][0].detach().cpu().clone()
-    swap_out_disk(worker, "tenant-A")
-    swap_in_disk(worker, "tenant-A")
-    reloaded = worker.adapter_states["tenant-A"]["trainable_params"][0].detach().cpu()
+  # Correctness: reload the longest-parked tenant, then round-trip it again.
+  if names[0] not in worker.adapter_states:
+    ins.append(swap_in_disk(worker, names[0])["wall_ms"])
+  if names[0] in worker.adapter_states:
+    saved = worker.adapter_states[names[0]]["trainable_params"][0].detach().cpu().clone()
+    swap_out_disk(worker, names[0])
+    swap_in_disk(worker, names[0])
+    reloaded = worker.adapter_states[names[0]]["trainable_params"][0].detach().cpu()
     check(torch.equal(saved, reloaded), "reloaded params identical to what was saved")
     check(not torch.equal(ref, reloaded), "params reflect training since start (sanity)")
     try:
-      fake_grads(worker, "tenant-A")
-      worker.optim_step({"learning_rate": 1e-4}, "tenant-A")
+      fake_grads(worker, names[0])
+      worker.optim_step({"learning_rate": 1e-4}, names[0])
       check(True, "optim_step after disk reload works")
     except Exception as e:
       check(False, f"optim_step after disk reload raised: {e}")
@@ -160,7 +173,7 @@ def main() -> int:
 
   summary = {"event": "disk_baseline_summary", "mode": "disk_baseline", "model": BASE_MODEL,
              "rank": LORA_RANK, "flush_caches": FLUSH_CACHES,
-             "cycles": CYCLES, "swap_out_p50_ms": round(p50(outs), 1), "swap_in_p50_ms": round(p50(ins), 1),
+             "cycles": CYCLES, "tenants": TENANTS, "swap_out_p50_ms": round(p50(outs), 1), "swap_in_p50_ms": round(p50(ins), 1),
              "n_out": len(outs), "n_in": len(ins), "failures": len(failures)}
   metrics.emit(**summary)
   print(f"[disk-baseline] SUMMARY {json.dumps(summary)}")

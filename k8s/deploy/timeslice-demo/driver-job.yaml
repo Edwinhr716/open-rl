@@ -12,12 +12,13 @@ spec:
       restartPolicy: Never
       containers:
       - name: driver
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v8
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v11-shm8
         command: ["python3", "scripts/timeslice_demo_driver.py"]
         env:
         - {name: GATEWAY_URL, value: "http://gateway:8000"}
-        - {name: BASE_MODEL, value: "Qwen/Qwen2.5-0.5B"}
-        - {name: ROUNDS, value: "8"}
+        - {name: BASE_MODEL, value: "Qwen/Qwen3-4B-Instruct-2507"}
+        - {name: ROUNDS, value: "3"}
+        - {name: LORA_RANK, value: "64"}
         - {name: LEARNING_RATE, value: "1e-3"}
         resources:
           requests: {memory: "512Mi", cpu: "250m"}

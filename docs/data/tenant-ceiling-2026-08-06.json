@@ -1,0 +1,30 @@
+{
+ "stock": {
+  "wall_tenants": 10,
+  "wall_r64": 8,
+  "wall_gpucr_env": 3
+ },
+ "disk": {
+  "tenants": 30,
+  "out_p50_ms": 7196.8,
+  "in_p50_ms": 6786.9,
+  "rt_s": 13.98,
+  "failures": 0
+ },
+ "snap": {
+  "tenants": 28,
+  "runs_passed": 14,
+  "out_p50_ms": 3117.4,
+  "in_p50_ms": 772.5,
+  "switch_p50_ms": 2562.6,
+  "switch_n": 126,
+  "vram_freed_p50_mb": 3170.9,
+  "store_gb": 41,
+  "retention": "28/28",
+  "conv_pct_by_round": {
+   "0": 0.0,
+   "1": 0.0,
+   "2": 75.0
+  }
+ }
+}
