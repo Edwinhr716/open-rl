@@ -287,7 +287,7 @@ through six more rounds of interleaved tenant-B training: 15 trainer swap cycles
 {chart_convergence()}
 <p class="note">Solid = snapshot-mode run, dashed = baseline run. Tenant-A converges identically in both modes
 and holds 100% on-target through every swap cycle. Tenant-B's snapshot-mode flatline is the pre-fix
-swap-ordering bug shown below — in baseline it converges normally, and with the swap-in-first fix
+sparse-copy corruption explained below — in baseline it converges normally, and with the swap-in-first fix
 (TIMESLICE_SWAP_IN_FIRST=1) the real-gradients diagnostic shows healthy convergence under swapping.</p>
 
 <h2 style="margin-top:14px">Where the swaps happen — timeline of rounds 1–2</h2>
@@ -301,12 +301,16 @@ generation. Hover any bar for the operation and duration; swap bars are hundreds
 
 <details><summary>Raw tokens per round</summary>
 <table><tr><th>round</th><th>tenant-A tokens</th><th>tenant-B tokens</th></tr>{conv_rows}</table></details>
-<p class="note"><b>Tenant-B mystery — solved.</b> Its snapshot-mode-only NaN was traced to swap ordering: the
-per-PID staging dump file is shared across snapshot groups, and the old out-then-in order transplanted the
-outgoing tenant's bytes into a slice of the incoming tenant's optimizer blocks (negative exp_avg_sq →
-AdamW sqrt → NaN). Fixed by restoring the incoming tenant before checkpointing the outgoing one
-(TIMESLICE_SWAP_IN_FIRST=1, now default); the real-gradients diagnostic confirms healthy convergence and
-all-finite state under swapping. Cost: both tenants transiently resident during a switch.</p></div>
+<p class="note"><b>Tenant-B mystery — solved (corrected causality).</b> Root cause: the agent's sparse-copy
+optimization treated all-zero payload runs as skippable holes — but first-step lora_A optimizer moments are
+exactly zero <i>by construction</i>, so ≥4MB of authoritative zeros became file holes, and the restore
+copy-back left the co-resident checkpoint's bytes underneath them (126/1008 regions transplanted,
+byte-identical across nodes; foreign signed bytes in exp_avg_sq → AdamW sqrt(negative) → NaN). Fixes:
+hole-faithful zero-filling restore copies in the agent (the actual fix), with restore-before-checkpoint
+ordering (TIMESLICE_SWAP_IN_FIRST=1) retained as defense-in-depth — under the old ordering, residue beneath
+holes is at least the same group's bytes. GEP-0003 (GPU-CR docs/proposals) closes the bug <i>class</i> with
+checksummed, epoch-verified restores. The real-gradients diagnostic confirms healthy convergence and
+all-finite state under swapping.</p></div>
 
 <div class="card"><h2>All runs</h2>
 <table><tr><th>run</th><th>configuration</th><th>key result</th><th>verdict</th></tr>{runs_appendix}</table></div>
@@ -322,7 +326,7 @@ and 18.1s (honest disk, 4B), while freeing {vram_05:.1f}–{vram_4b:.1f}GB of VR
 dropped 22–58×.</li>
 <li><b>Every failure found had a root cause, and every root cause has a fix in the branch:</b> hugetlbfs
 write(2)/pid_map gaps (agent-side workarounds), reservation leaks (GC), hung cr_client (timeouts + FAULTED
-recovery), the swap-ordering NaN (swap-in-first), untracked-tensor crashes (address filter), and block
+recovery), the sparse-copy zero-payload corruption (hole-faithful copies + swap-in-first as defense-in-depth), untracked-tensor crashes (address filter), and block
 amplification (unrounded dumps, upstream PR-ready).</li>
 <li><b>Operational discipline is part of the system:</b> clean-slate cycle before runs, tenant-keyed snapshot
 groups with TTL GC, and pod-cgroup-aware tmpfs sizing for the agent.</li>
