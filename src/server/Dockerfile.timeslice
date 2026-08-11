@@ -5,19 +5,24 @@
 # The prebuilt .so from the llm-d branch is used deliberately: it contains
 # fixes (signal remaps to SIGRTMAX-8/-7, hugetlbfs pinned-memory tolerance)
 # that are not all present in the GPU-CR v0.2.0 tag — do not rebuild from tag.
+#
+# Client pinned to memory-regions-backendconfig: the BackendConfig-oneof API
+# (memory_regions_config + snapshot_name). Wire-incompatible with the older
+# gcr-backend-memory-allocation prototype (backend enum + memory_addresses);
+# the agent image must be built from the same branch.
 FROM vllm/vllm-openai:v0.22.0
 
 USER root
 WORKDIR /app
 
-ADD https://raw.githubusercontent.com/Edwinhr716/llm-d-rl-time-slicing/gcr-backend-memory-allocation/bin/vGPU-NVIDIA.so /usr/local/lib/vGPU-NVIDIA.so
+ADD https://raw.githubusercontent.com/Edwinhr716/llm-d-rl-time-slicing/memory-regions-backendconfig/bin/vGPU-NVIDIA.so /usr/local/lib/vGPU-NVIDIA.so
 RUN chmod 755 /usr/local/lib/vGPU-NVIDIA.so
 
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir --upgrade protobuf grpcio grpcio-tools peft redis \
     opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi && \
     pip install --no-cache-dir \
-    "git+https://github.com/Edwinhr716/llm-d-rl-time-slicing.git@gcr-backend-memory-allocation#subdirectory=pkg/client/python"
+    "git+https://github.com/Edwinhr716/llm-d-rl-time-slicing.git@memory-regions-backendconfig#subdirectory=pkg/client/python"
 
 # One image serves every role: sampler (default entrypoint), trainer
 # (python -m server.training_requests_processor with

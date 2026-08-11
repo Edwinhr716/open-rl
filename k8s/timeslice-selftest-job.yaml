@@ -19,9 +19,13 @@ spec:
       restartPolicy: Never
       hostIPC: true
       hostPID: true
+      # Pin to the 60Gi-hugepages pool running the memory-regions agent; the
+      # other 60Gi pool (-c) hosts a different agent build.
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
       containers:
       - name: sampler
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v1
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v13-memregions
         securityContext:
           runAsUser: 0
         imagePullPolicy: Always
@@ -100,9 +104,11 @@ spec:
         app: timeslice-selftest
     spec:
       restartPolicy: Never
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
       containers:
       - name: sampler
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v1
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v13-memregions
         securityContext:
           runAsUser: 0
         imagePullPolicy: Always

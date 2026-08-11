@@ -13,9 +13,11 @@ Rules learned from code audit + Phase 0/1:
 - Snapshot then swap_in must use the SAME address list (the agent restores by
   pid:addr:size). Addresses are stable across set_adapter, but
   load_from_state reallocates the adapter — call forget() there.
-- The snapshot group is one fixed name per tenant, overwritten on every
-  swap_out: the trainer's bytes change every optim_step, so stale groups are
-  useless and per-version groups would accumulate on the tmpfs store.
+- The snapshot slot (MemoryRegionsBackendConfig.snapshot_name) is one fixed
+  name per tenant, overwritten on every swap_out: the trainer's bytes change
+  every optim_step, so stale slots are useless and per-version slots would
+  accumulate on the tmpfs store. The request's `group` field is orchestrator
+  bookkeeping and does not name agent-side storage.
 - Requires PYTORCH_NO_CUDA_MEMORY_CACHING=1 (GPU-CR tracks whole cudaMalloc
   blocks) and CUDA_LAUNCH_BLOCKING=1 (async launches race the physical
   release — hard requirement, verified in Phase 1).
@@ -34,7 +36,7 @@ def _now_ms() -> float:
   return time.monotonic() * 1000.0
 
 
-def _group(model_id: str) -> str:
+def _snapshot_name(model_id: str) -> str:
   return "trainer-" + re.sub(r"[^A-Za-z0-9._-]", "-", model_id)[-80:]
 
 
@@ -54,18 +56,16 @@ class TimesliceTenantManager:
     self.metrics = metrics or MetricsWriter()
     self.worker = None
     self._client = None
-    self._backend = None
     self._swapped_out: dict[str, list[str]] = {}  # model_id -> address list used at snapshot time
 
     if self.enabled:
-      from timeslice.snapshot_agent import snapshot_agent_pb2
-      from timeslice.snapshot_agent.client import SnapshotAgentClient
+      from timeslice.snapshot_agent import SnapshotAgentClient
 
       endpoint = agent_endpoint or os.environ["AGENT_ENDPOINT"]
       self._client = SnapshotAgentClient(endpoint=endpoint)
-      self._client.check_health()
-      self._backend = snapshot_agent_pb2.BACKEND_GPU_CR_MEMORY_ADDRESSES
-      print(f"[timeslice-trainer] connected to snapshot agent at {endpoint}")
+      # Per-backend health: verifies the agent can resolve cr_client.
+      self._client.check_health("memory-regions")
+      print(f"[timeslice-trainer] connected to snapshot agent at {endpoint} (memory-regions healthy)")
 
   def attach_worker(self, worker):
     self.worker = worker
@@ -104,9 +104,12 @@ class TimesliceTenantManager:
     return targets or None
 
   def _op(self, op: str, model_id: str, addresses: list[str]) -> dict:
+    from timeslice.snapshot_agent import memory_regions_config
+
     fn = self._client.snapshot_and_wait if op == "snapshot" else self._client.restore_and_wait
     t0 = _now_ms()
-    resp = fn(job_id=self.job_id, group=_group(model_id), backend=self._backend, memory_addresses=addresses, poll_interval_sec=0.05)
+    config = memory_regions_config(addresses, snapshot_name=_snapshot_name(model_id))
+    resp = fn(job_id=self.job_id, group=_snapshot_name(model_id), backend_config=config, poll_interval_sec=0.05)
     wall = _now_ms() - t0
     if resp.status != "OPERATION_STATUS_COMPLETE":
       raise RuntimeError(f"trainer {op}({model_id}) failed: {resp.status} {resp.error}")

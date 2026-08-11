@@ -3,8 +3,11 @@
 vLLM is run with max_loras=1, so a single GPU slot holds the active adapter.
 Instead of letting vLLM reload adapter weights from shared storage on every
 tenant switch, this manager snapshots the slot's raw GPU memory through the
-node-local Snapshot Agent (BACKEND_GPU_CR_MEMORY_ADDRESSES / GPU-CR selective
-checkpoint) and restores another tenant's bytes in place.
+node-local Snapshot Agent (memory-regions backend / GPU-CR selective
+checkpoint, selected via the BackendConfig oneof) and restores another
+tenant's bytes in place. The agent-side storage slot is named by
+MemoryRegionsBackendConfig.snapshot_name; the request's `group` field is
+orchestrator bookkeeping only and does not name storage.
 
 Swap semantics (validated by llm-d-rl-time-slicing's test_lora_swap_max1.py):
 
@@ -55,11 +58,11 @@ def _tenant_key(lora_id: str) -> str:
   return lora_id
 
 
-def _group_name(lora_id: str) -> str:
-  """Snapshot group: one per TENANT, overwritten in place on each save.
+def _snapshot_name(lora_id: str) -> str:
+  """Snapshot slot name: one per TENANT, overwritten in place on each save.
   Freshness is tracked separately per session id (the _saved set), so a
-  stale group is never restored — a new session disk-loads and re-snapshots
-  over the tenant's group."""
+  stale slot is never restored — a new session disk-loads and re-snapshots
+  over the tenant's slot."""
   safe = re.sub(r"[^A-Za-z0-9._-]", "-", _tenant_key(lora_id))
   return f"lora-{safe[-80:]}"
 
@@ -128,7 +131,6 @@ class TimesliceLoraManager:
 
     self._llm = None
     self._client = None
-    self._backend = None
     self._slot_targets: list[str] | None = None
 
     self.resident_id: str | None = None       # logical adapter whose bytes are in the slot
@@ -137,14 +139,14 @@ class TimesliceLoraManager:
     self._last_id: str | None = None          # for baseline switch accounting
 
     if self.enabled:
-      from timeslice.snapshot_agent import snapshot_agent_pb2
-      from timeslice.snapshot_agent.client import SnapshotAgentClient
+      from timeslice.snapshot_agent import SnapshotAgentClient
 
       endpoint = agent_endpoint or os.environ["AGENT_ENDPOINT"]
       self._client = SnapshotAgentClient(endpoint=endpoint)
-      self._client.check_health()
-      self._backend = snapshot_agent_pb2.BACKEND_GPU_CR_MEMORY_ADDRESSES
-      print(f"[timeslice] connected to snapshot agent at {endpoint}")
+      # Per-backend health: verifies the agent can resolve cr_client, not
+      # just that the gRPC server is up.
+      self._client.check_health("memory-regions")
+      print(f"[timeslice] connected to snapshot agent at {endpoint} (memory-regions healthy)")
 
   def attach_engine(self, llm):
     """Attach the sync vllm.LLM instance (needed for apply_model)."""
@@ -159,9 +161,12 @@ class TimesliceLoraManager:
       self.metrics.emit(event="discover", regions=len(self._slot_targets))
 
   def _agent_op(self, op: str, lora_id: str) -> dict:
+    from timeslice.snapshot_agent import memory_regions_config
+
     fn = self._client.snapshot_and_wait if op == "snapshot" else self._client.restore_and_wait
     t0 = _now_ms()
-    resp = fn(job_id=self.job_id, group=_group_name(lora_id), backend=self._backend, memory_addresses=self._slot_targets, poll_interval_sec=0.05)
+    config = memory_regions_config(self._slot_targets, snapshot_name=_snapshot_name(lora_id))
+    resp = fn(job_id=self.job_id, group=_snapshot_name(lora_id), backend_config=config, poll_interval_sec=0.05)
     wall = _now_ms() - t0
     if resp.status != "OPERATION_STATUS_COMPLETE":
       raise RuntimeError(f"{op}({lora_id}) failed: {resp.status} {resp.error}")

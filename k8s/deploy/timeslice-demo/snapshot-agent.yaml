@@ -52,7 +52,7 @@ spec:
         - name: snapshot-agent
           securityContext:
             privileged: true
-          image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/llm-d-rl-time-slicing/snapshot-agent:hugetlbfs-v5
+          image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/llm-d-rl-time-slicing/snapshot-agent:memregions-v1
           imagePullPolicy: IfNotPresent
           env:
             - name: PATH
@@ -69,7 +69,12 @@ spec:
               value: "all"
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: "compute,utility"
-            # Snapshot group copies must live on disk: hugetlbfs has no
+            # memory-regions ctl dir (matches the huge-ckpt mount below).
+            # Must be set explicitly: the agent only starts the snapshot-store
+            # GC sweeper when EXPORT_FILE_PATH is present in the environment.
+            - name: EXPORT_FILE_PATH
+              value: /mnt/huge-ckpt
+            # Snapshot slot copies must live on disk: hugetlbfs has no
             # write(2) support and copies there would pin hugepages forever.
             - name: SNAPSHOT_DIR
               value: /var/snapshots

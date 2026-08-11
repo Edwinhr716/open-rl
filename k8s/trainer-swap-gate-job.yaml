@@ -17,9 +17,13 @@ spec:
       restartPolicy: Never
       hostIPC: true
       hostPID: true
+      # Pin to the 60Gi-hugepages pool running the memory-regions agent; the
+      # other 60Gi pool (-c) hosts a different agent build.
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
       containers:
       - name: trainer
-        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v2
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v13-memregions
         command: ["python3", "scripts/test_trainer_swap.py"]
         securityContext:
           runAsUser: 0
