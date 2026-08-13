@@ -1,0 +1,175 @@
+# Full-process park/resume gate: cuda-checkpoint vs GPU-CR direct_memory
+# through the Go snapshot-agent (see scripts/test_fullproc_park.py).
+#
+# The script is injected via ConfigMap (no image rebuild):
+#   kubectl -n openrl-demo create configmap park-gate-script \
+#     --from-file=scripts/test_fullproc_park.py --dry-run=client -o yaml | kubectl apply -f -
+#
+# Run the cuda arm first, then delete it and unsuspend the direct-memory arm
+# (one GPU, same node, fair comparison). Both talk to the dmb agent on :9002.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: park-gate-cuda
+  namespace: openrl-demo
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: park-gate
+        snapshot-agent: "true"
+        timeslice.io/job-id: "park-gate-cuda"
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
+      containers:
+      - name: workload
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v13-memregions
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: Always
+        command: ["python3", "/gate/test_fullproc_park.py"]
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: AGENT_ENDPOINT
+          value: "$(NODE_IP):9002"
+        - name: PARK_BACKEND
+          value: "cuda"
+        - name: JOB_ID
+          value: "park-gate-cuda"
+        - name: ROUNDS
+          value: "20"
+        - name: BASE_MODEL
+          value: "facebook/opt-125m"
+        - name: VLLM_GPU_MEMORY_UTILIZATION
+          value: "0.20"
+        # Stock workload: no preloader, no env taxes. Engine kept in-process
+        # so the labeled PID owns the CUDA context.
+        - name: VLLM_ENABLE_V1_MULTIPROCESSING
+          value: "0"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        volumeMounts:
+        - name: gate-script
+          mountPath: /gate
+        resources:
+          requests:
+            memory: "11Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            # cuda-checkpoint copies device memory into this process's host
+            # RAM: the limit must hold the full VRAM working set.
+            memory: "11Gi"
+            nvidia.com/gpu: "1"
+      volumes:
+      - name: gate-script
+        configMap:
+          name: park-gate-script
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: park-gate-dm
+  namespace: openrl-demo
+spec:
+  backoffLimit: 0
+  suspend: true   # unsuspend after the cuda arm completes (same GPU)
+  template:
+    metadata:
+      labels:
+        app: park-gate
+        snapshot-agent: "true"
+        timeslice.io/job-id: "park-gate-dm"
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      hostIPC: true
+      nodeSelector:
+        cloud.google.com/gke-nodepool: rl-hugepages-l4-b
+      containers:
+      - name: workload
+        image: asia-southeast1-docker.pkg.dev/edwinhernandez-gke-dev/time-slicing/open-rl/timeslice-sampler:v13-memregions
+        securityContext:
+          runAsUser: 0
+        imagePullPolicy: Always
+        command: ["python3", "/gate/test_fullproc_park.py"]
+        env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: AGENT_ENDPOINT
+          value: "$(NODE_IP):9002"
+        - name: PARK_BACKEND
+          value: "direct_memory"
+        - name: JOB_ID
+          value: "park-gate-dm"
+        - name: ROUNDS
+          value: "20"
+        - name: BASE_MODEL
+          value: "facebook/opt-125m"
+        - name: VLLM_GPU_MEMORY_UTILIZATION
+          value: "0.20"
+        # GPU-CR workload environment: vGPU preloader + the known-good taxes
+        # the deployed .so build was validated with.
+        - name: GPU_VENDOR
+          value: "NVIDIA"
+        - name: LD_PRELOAD
+          value: "/usr/local/lib/vGPU-NVIDIA.so"
+        - name: EXPORT_FILE_PATH
+          value: "/mnt/huge-ckpt"
+        - name: ENFORCE_EAGER
+          value: "1"
+        - name: PYTORCH_NO_CUDA_MEMORY_CACHING
+          value: "1"
+        - name: CUDA_LAUNCH_BLOCKING
+          value: "1"
+        - name: VLLM_ENABLE_V1_MULTIPROCESSING
+          value: "0"
+        - name: VLLM_ALLOW_INSECURE_SERIALIZATION
+          value: "1"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+        volumeMounts:
+        - name: gate-script
+          mountPath: /gate
+        - name: huge-ckpt
+          mountPath: /mnt/huge-ckpt
+          mountPropagation: HostToContainer
+        resources:
+          requests:
+            memory: "6Gi"
+            nvidia.com/gpu: "1"
+            hugepages-2Mi: "28Gi"
+          limits:
+            memory: "6Gi"
+            nvidia.com/gpu: "1"
+            # GPU-CR dumps into hugetlbfs, charged to the hugetlb cgroup —
+            # the extent covers the stock SHM_SIZE_GB=25 build.
+            hugepages-2Mi: "28Gi"
+      volumes:
+      - name: gate-script
+        configMap:
+          name: park-gate-script
+      - name: huge-ckpt
+        hostPath:
+          path: /var/tmp/huge-ckpt
+          type: DirectoryOrCreate
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
