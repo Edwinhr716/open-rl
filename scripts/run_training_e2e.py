@@ -207,10 +207,19 @@ def start_backend(config: RunConfig, processes: list[ManagedProcess]) -> str:
       lambda: redis_ok("127.0.0.1", redis_port),
       timeout=60,
     )
-    if shutil.which("cuda-checkpoint") is None:
+    park_backend = os.environ.get("PARK_BACKEND", "direct_memory")
+    if park_backend == "cuda":
+      if shutil.which("cuda-checkpoint") is None:
+        raise RuntimeError(
+          "cuda-checkpoint is required for FFT e2e scenarios with PARK_BACKEND=cuda (the snapshot agent checkpoints "
+          "workers around every batch); install the binary matching your driver from https://github.com/NVIDIA/cuda-checkpoint"
+        )
+    elif not os.environ.get("AGENT_ENDPOINT"):
       raise RuntimeError(
-        "cuda-checkpoint is required for FFT e2e scenarios (the snapshot agent checkpoints workers around every batch); "
-        "install the binary matching your driver from https://github.com/NVIDIA/cuda-checkpoint"
+        "AGENT_ENDPOINT is required for FFT e2e scenarios with PARK_BACKEND=direct_memory: the snapshot agent parks "
+        "workers through the timeslice Go snapshot-agent (run it in standalone mode with "
+        "--feature-gates=DirectMemoryBackend=true, and start workers under the GPU-CR vGPU preloader); "
+        "set PARK_BACKEND=cuda to fall back to the cuda-checkpoint binary"
       )
     snapshot_socket = log_dir / "snapshot-agent.sock"
     snapshot_socket.unlink(missing_ok=True)

@@ -240,5 +240,122 @@ async def acquire_once(client: SnapshotAgentClient, pid: int) -> int:
     return pid
 
 
+class _FakeTimeslice:
+  """Injects a fake `timeslice.snapshot_agent` module so DirectMemoryRestorer
+  can be exercised without the pip-installed client or a live agent."""
+
+  def __init__(self, snapshot_responses=None):
+    import types
+
+    self.calls: list[tuple] = []
+    self.snapshot_responses = list(snapshot_responses or [])
+    fake_calls = self.calls
+    fake_responses = self.snapshot_responses
+
+    def _response(status="OPERATION_STATUS_COMPLETE", error=""):
+      return types.SimpleNamespace(status=status, error=error)
+
+    class FakeClient:
+      def __init__(self, endpoint):
+        fake_calls.append(("init", endpoint))
+
+      def check_health(self, service=""):
+        fake_calls.append(("health", service))
+        return types.SimpleNamespace(status="SERVING")
+
+      def snapshot_and_wait(self, job_id, group="", poll_interval_sec=1.0, backend_config=None):
+        fake_calls.append(("snapshot", job_id, backend_config))
+        if fake_responses:
+          item = fake_responses.pop(0)
+          if isinstance(item, Exception):
+            raise item
+          return item
+        return _response()
+
+      def restore_and_wait(self, job_id, group="", poll_interval_sec=1.0, backend_config=None):
+        fake_calls.append(("restore", job_id, backend_config))
+        return _response()
+
+    module = types.ModuleType("timeslice.snapshot_agent")
+    module.SnapshotAgentClient = FakeClient
+    module.direct_memory_config = lambda pids: ("direct_memory", tuple(pids))
+    package = types.ModuleType("timeslice")
+    package.snapshot_agent = module
+    self.modules = {"timeslice": package, "timeslice.snapshot_agent": module}
+    self.response = _response
+
+
+class DirectMemoryRestorerTest(unittest.TestCase):
+  def _restorer(self, fake, **kwargs):
+    import sys
+    from unittest import mock
+
+    from snapshot_agent.checkpoint import DirectMemoryRestorer
+
+    with mock.patch.dict(sys.modules, fake.modules):
+      return DirectMemoryRestorer(endpoint="agent:9000", job_prefix="unit", precondition_delay_s=0.0, **kwargs)
+
+  def test_checks_backend_health_on_init_and_uses_per_pid_job_ids(self) -> None:
+    fake = _FakeTimeslice()
+    restorer = self._restorer(fake)
+    restorer.checkpoint(101)
+    restorer.restore(101)
+    self.assertEqual(fake.calls[0], ("init", "agent:9000"))
+    self.assertEqual(fake.calls[1], ("health", "direct-memory"))
+    self.assertEqual(fake.calls[2], ("snapshot", "unit-101", ("direct_memory", (101,))))
+    self.assertEqual(fake.calls[3], ("restore", "unit-101", ("direct_memory", (101,))))
+
+  def test_checkpoint_retries_failed_precondition(self) -> None:
+    fake = _FakeTimeslice(snapshot_responses=[RuntimeError("rpc error: code = FAILED_PRECONDITION desc = job not running")])
+    restorer = self._restorer(fake)
+    restorer.checkpoint(202)
+    snapshots = [c for c in fake.calls if c[0] == "snapshot"]
+    self.assertEqual(len(snapshots), 2)
+
+  def test_checkpoint_surfaces_other_errors_immediately(self) -> None:
+    fake = _FakeTimeslice(snapshot_responses=[RuntimeError("rpc error: code = UNAVAILABLE")])
+    restorer = self._restorer(fake)
+    with self.assertRaises(RuntimeError):
+      restorer.checkpoint(303)
+    snapshots = [c for c in fake.calls if c[0] == "snapshot"]
+    self.assertEqual(len(snapshots), 1)
+
+  def test_failed_operation_status_raises(self) -> None:
+    fake = _FakeTimeslice()
+    fake.snapshot_responses.append(fake.response(status="OPERATION_STATUS_FAILED", error="dump store full"))
+    restorer = self._restorer(fake)
+    with self.assertRaisesRegex(RuntimeError, "dump store full"):
+      restorer.checkpoint(404)
+
+
+class BuildRestorerTest(unittest.TestCase):
+  def _args(self, **overrides):
+    import types
+
+    defaults = {
+      "park_backend": "cuda",
+      "agent_endpoint": None,
+      "job_prefix": None,
+      "cuda_checkpoint_bin": "cuda-checkpoint",
+      "cuda_checkpoint_timeout_ms": None,
+    }
+    defaults.update(overrides)
+    return types.SimpleNamespace(**defaults)
+
+  def test_cuda_backend_builds_cuda_checkpoint_restorer(self) -> None:
+    from snapshot_agent.checkpoint import CudaCheckpointRestorer
+    from snapshot_agent.serve import build_restorer
+
+    restorer = build_restorer(self._args(park_backend="cuda"))
+    self.assertIsInstance(restorer, CudaCheckpointRestorer)
+
+  def test_direct_memory_backend_requires_endpoint(self) -> None:
+    from snapshot_agent.serve import build_restorer
+
+    with self.assertRaises(SystemExit):
+      build_restorer(self._args(park_backend="direct_memory"))
+
+
+
 if __name__ == "__main__":
   unittest.main()

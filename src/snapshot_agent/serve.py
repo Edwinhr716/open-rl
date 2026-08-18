@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .checkpoint import CheckpointRestorer, CudaCheckpointRestorer
+from .checkpoint import CheckpointRestorer, CudaCheckpointRestorer, DirectMemoryRestorer
 
 logger = logging.getLogger(__name__)
 
@@ -184,17 +184,33 @@ async def dispatch(agent: SnapshotAgent, line: bytes, connection_id: int) -> dic
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="Run the OpenRL snapshot agent.")
   parser.add_argument("--socket", default=os.getenv("OPEN_RL_SNAPSHOT_AGENT_SOCKET", "/tmp/open-rl/snapshot-agent.sock"))
+  parser.add_argument(
+    "--park-backend",
+    choices=("direct_memory", "cuda"),
+    default=os.getenv("PARK_BACKEND", "direct_memory"),
+    help="direct_memory parks through the timeslice Go snapshot-agent (GPU-CR); cuda shells out to the cuda-checkpoint binary",
+  )
+  parser.add_argument("--agent-endpoint", default=os.getenv("AGENT_ENDPOINT"))
+  parser.add_argument("--job-prefix", default=os.getenv("JOB_ID"))
   parser.add_argument("--cuda-checkpoint-bin", default=os.getenv("CUDA_CHECKPOINT_BIN", "cuda-checkpoint"))
   parser.add_argument("--cuda-checkpoint-timeout-ms", type=int, default=None)
   return parser.parse_args()
 
 
+def build_restorer(args: argparse.Namespace) -> CheckpointRestorer:
+  if args.park_backend == "direct_memory":
+    if not args.agent_endpoint:
+      raise SystemExit("--agent-endpoint (or AGENT_ENDPOINT) is required for the direct_memory backend")
+    return DirectMemoryRestorer(endpoint=args.agent_endpoint, job_prefix=args.job_prefix)
+  return CudaCheckpointRestorer(args.cuda_checkpoint_bin, args.cuda_checkpoint_timeout_ms)
+
+
 async def main_async() -> None:
   args = parse_args()
-  restorer = CudaCheckpointRestorer(args.cuda_checkpoint_bin, args.cuda_checkpoint_timeout_ms)
+  restorer = build_restorer(args)
   agent = SnapshotAgent(restorer)
   server = await start_snapshot_agent(agent, args.socket)
-  logger.info("listening on %s", args.socket)
+  logger.info("listening on %s (park backend: %s)", args.socket, args.park_backend)
   async with server:
     await server.serve_forever()
 
